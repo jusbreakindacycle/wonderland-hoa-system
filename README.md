@@ -1,0 +1,220 @@
+# Wonderland HOA System
+
+A documentation-led modernization of the management system for **Wonderland Homeowners Association, Inc.**, serving Wonderland Townhomes in Barangay Namayan, Mandaluyong City.
+
+> **Project status:** The repository currently contains a legacy prototype under reconciliation. Phase 1 policy and governance discovery is substantially complete, and Phase 2 domain and service blueprint work is authorized. Coding, migration, deployment, and production use are **not yet authorized**.
+
+## Community Scope
+
+The system is intended for Wonderland Townhomes in **Barangay Namayan, Mandaluyong City**, distinct from the similarly named community associated with Barangay Mauway.
+
+Covered internal streets:
+
+- Wonderland Avenue
+- Sampaguita
+- Yellowbell
+- Orchids
+- Sunflower
+
+`Circle` is excluded from the project scope.
+
+The operational address model uses separate **house number** and **official street** values. It does not use phase, block, or lot.
+
+## Current Repository
+
+The existing codebase is a legacy operating prototype built with:
+
+- React 18
+- Vite
+- TypeScript
+- Tailwind CSS
+- Supabase Auth
+- Supabase-managed PostgreSQL
+- Row Level Security
+- Supabase Edge Functions
+- TanStack Query and Table
+- Zustand
+
+Existing prototype modules include:
+
+- authentication and role-based navigation;
+- dashboard summaries;
+- property and homeowner records;
+- monthly dues generation;
+- partial and multi-month payments;
+- payment allocations and property credits;
+- printable receipts and delinquency reports;
+- complaints;
+- visitor logs;
+- announcements; and
+- financial audit logs.
+
+These modules are evidence of prior implementation work. They are **not automatically approved product requirements or production-ready implementations**.
+
+## Confirmed Phase 1 Design Inputs
+
+The approved Phase 1 register establishes these core design inputs:
+
+- Monthly dues are **₱400 per property per month**.
+- One owner may own multiple properties; each property is billed separately.
+- Multiple families sharing one property still have one combined property-level due.
+- There is no formal monthly due date and no monetary late-payment penalty.
+- Outstanding balances carry forward.
+- Payments are applied to the **oldest unpaid balance first**.
+- Cash is the only payment method in the initial approved scope.
+- Overpayments become property credit applied to the next month.
+- Valid vacant properties are not billed while approved vacant status is active.
+- Payment date and billing coverage are separate facts.
+- Partial and multi-month payments must remain traceable.
+- Receipts use one sequential association-wide number series.
+- Receipt numbers must never be deleted or reused.
+- Dues and sports fines must be accounted for under separate financial categories.
+- Accounts belong to people; properties must not use fake, shared, or default login accounts.
+- One personal account may be linked to multiple authorized properties.
+- Material actions require traceable actor, reason, approval, date, and audit history.
+
+Some operating practices still require formal HOA documentation, Board resolution, member ratification, or additional evidence before the future system may enforce them as formal association policy.
+
+## Approved Phase 2 Blueprint Scope
+
+The Phase 2 domain and service blueprint must cover at least:
+
+1. Structured property and address records.
+2. Multi-property ownership.
+3. Separate owner, resident, tenant, household, and user-account relationships.
+4. Property-level financial accounts.
+5. Monthly charges, partial payments, and allocation ledgers.
+6. Property credits and next-month application.
+7. Vacant-status approval and billing suspension.
+8. Sequential receipt control and receipt lifecycle.
+9. Separate categories for dues, sports fines, and future charges.
+10. Separation of duties and approval records.
+11. Delinquency and good-standing workflows with due process.
+12. Vehicle-sticker eligibility and issuance records.
+13. Officer, Board, and committee assignments with terms.
+14. Sports permits, guest rosters, violations, fines, sanctions, and appeals.
+15. Announcements, a permanent Knowledge Base, and a policy/document archive.
+16. Secure personal-account invitations and access revocation.
+17. Complete audit history for material changes.
+18. Configurable effective dates and policy versions.
+
+## Documentation
+
+### Controlling Phase 1 design input
+
+- [Phase 1 Policy, Governance and Controls Register v1.0](docs/phase-1/2026-08-04_WONDERLAND_PHASE_1_POLICY_GOVERNANCE_CONTROLS_REGISTER_v1.0.md)
+
+### Formal HOA follow-up
+
+- [Formal Adoption Action List v0.1](docs/phase-1/2026-08-04_WONDERLAND_FORMAL_ADOPTION_ACTION_LIST_v0.1.md)
+
+### Legacy repository review
+
+- [Legacy Repository Reconciliation and Technology-Stack Review v0.3](docs/reconciliation/2026-07-28_WONDERLAND_LEGACY_REPOSITORY_RECONCILIATION_AND_STACK_REVIEW.md)
+
+Document authority differs by file:
+
+- The Phase 1 register is **Product Owner approved for Phase 2 design input**.
+- The formal adoption list identifies items still requiring authoritative HOA action or evidence.
+- The reconciliation report remains a **Working Draft audit and recommendation artifact**; it does not approve architecture or implementation.
+
+## Roadmap
+
+| Phase | Status |
+|---|---|
+| Phase 0 — Legacy reconciliation | Completed and committed |
+| Phase 1 — Core discovery | Substantially complete |
+| Phase 1 — Formal evidence collection | Open; non-blocking where explicitly marked pending formalization |
+| Phase 2 — Domain and service blueprint | Authorized to begin in ChatGPT |
+| Phase 3 — Stack and repository strategy approval | Not started |
+| Phase 4 — Technical implementation | Not authorized |
+
+## Development Workflow
+
+Documentation and implementation are intentionally separated:
+
+- **ChatGPT:** requirements, research, analysis, document drafting, review, approval, finalization, and downloadable document production.
+- **User:** manually places finalized documents into the repository and performs simple Git commits in the terminal.
+- **Claude Code:** reserved for bounded coding, migrations, testing, builds, debugging, and hands-on technical implementation after authorization.
+
+This avoids spending implementation-tool tokens on documentation work and prevents unapproved assumptions from entering the codebase.
+
+## Local Setup — Legacy Prototype Only
+
+The following steps run the existing prototype for inspection. They do not authorize production deployment or use of the legacy migrations against a live project.
+
+### Prerequisites
+
+- Node.js
+- npm
+- A Supabase project configured for development
+
+### Install
+
+```bash
+npm install
+```
+
+### Environment variables
+
+Copy the example file to a local ignored file:
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+Set these values in `.env.local`:
+
+```env
+VITE_SUPABASE_URL=your-supabase-project-url
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+```
+
+Never commit real credentials. Do not place a Supabase service-role key in frontend environment files.
+
+### Run
+
+```bash
+npm run dev
+```
+
+### Available scripts
+
+```bash
+npm run dev
+npm run build
+npm run lint
+npm run preview
+```
+
+The legacy audit found no automated tests or CI/CD pipeline, and the lint configuration is incomplete. A successful command should not be assumed until it is executed and verified in the current environment.
+
+## Security and Production Warning
+
+The current implementation has known schema, authorization, auditability, receipt-control, and policy-alignment gaps. In particular:
+
+- the property model does not yet store a separate official street;
+- house number is globally unique in the legacy schema;
+- privileged database functions require role, ownership, grant, identity, and `search_path` hardening;
+- the dues-generation Edge Function lacks HOA-role authorization in its own code;
+- financial actor attribution is not reliably bound to the authenticated caller;
+- the current printed receipt number is not a valid physical receipt-control mechanism;
+- existing migrations encode legacy rules that do not match the approved Phase 1 register.
+
+**Do not deploy the current prototype as a production financial system and do not apply its migrations to a production database without an approved Phase 2 blueprint, Phase 3 technical decision, reviewed migration plan, and verified tests.**
+
+## Repository Safety
+
+Environment files containing real values are ignored:
+
+```text
+.env
+.env.local
+.env.*.local
+```
+
+Keep `.env.example` limited to placeholders. Never commit service-role keys, database passwords, personal account credentials, or resident data.
+
+## License
+
+No license has been declared yet. Until a license is added, the repository remains under the copyright holder's default rights.
