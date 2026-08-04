@@ -2,7 +2,7 @@
 
 A documentation-led modernization of the management system for **Wonderland Homeowners Association, Inc.**, serving Wonderland Townhomes in Barangay Namayan, Mandaluyong City.
 
-> **Project status:** The repository currently contains a legacy prototype under reconciliation. Phase 1 policy and governance discovery is substantially complete, and Phase 2 domain and service blueprint work is authorized. Coding, migration, deployment, and production use are **not yet authorized**.
+> **Project status:** Phase 0 reconciliation, Phase 1 policy discovery, and the Phase 2 Domain and Service Blueprint are complete. Phase 3 architecture and repository-strategy work is authorized. Coding, migration, deployment, and production use remain **unauthorized until Phase 3 is approved**.
 
 ## Community Scope
 
@@ -75,9 +75,9 @@ The approved Phase 1 register establishes these core design inputs:
 
 Some operating practices still require formal HOA documentation, Board resolution, member ratification, or additional evidence before the future system may enforce them as formal association policy.
 
-## Approved Phase 2 Blueprint Scope
+## Approved Phase 2 Blueprint
 
-The Phase 2 domain and service blueprint must cover at least:
+The controlling Phase 2 blueprint defines:
 
 1. Structured property and address records.
 2. Multi-property ownership.
@@ -97,8 +97,18 @@ The Phase 2 domain and service blueprint must cover at least:
 16. Secure personal-account invitations and access revocation.
 17. Complete audit history for material changes.
 18. Configurable effective dates and policy versions.
+19. Effective-dated ₱400 monthly-dues and ₱200 vehicle-sticker fee rules.
+20. A clean Association-controlled Supabase production project, with no legacy personal-project data migration required.
 
 ## Documentation
+
+### Controlling Phase 2 blueprint
+
+- [Phase 2 Domain and Service Blueprint v1.0](docs/phase-2/2026-08-04_WONDERLAND_PHASE_2_DOMAIN_AND_SERVICE_BLUEPRINT_v1.0.md)
+
+### Supporting Phase 2 formalization drafts
+
+- [Governance and Operations Formalization Draft Pack v0.3](docs/phase-2/formalization/2026-08-04_WONDERLAND_FORMALIZATION_DRAFT_PACK_v0.3.md)
 
 ### Controlling Phase 1 design input
 
@@ -114,20 +124,22 @@ The Phase 2 domain and service blueprint must cover at least:
 
 Document authority differs by file:
 
-- The Phase 1 register is **Product Owner approved for Phase 2 design input**.
+- The Phase 2 blueprint v1.0 is the **controlling product-domain and service design**.
+- The Phase 2 formalization pack contains draft resolutions, policies, registers, and procedures that require the stated HOA approval before becoming effective.
+- The Phase 1 register remains the controlling discovery and governance input.
 - The formal adoption list identifies items still requiring authoritative HOA action or evidence.
-- The reconciliation report remains a **Working Draft audit and recommendation artifact**; it does not approve architecture or implementation.
+- The reconciliation report remains an audit and recommendation artifact; it does not itself approve architecture or implementation.
 
 ## Roadmap
 
 | Phase | Status |
 |---|---|
-| Phase 0 — Legacy reconciliation | Completed and committed |
-| Phase 1 — Core discovery | Substantially complete |
-| Phase 1 — Formal evidence collection | Open; non-blocking where explicitly marked pending formalization |
-| Phase 2 — Domain and service blueprint | Authorized to begin in ChatGPT |
-| Phase 3 — Stack and repository strategy approval | Not started |
-| Phase 4 — Technical implementation | Not authorized |
+| Phase 0 — Legacy reconciliation | Completed |
+| Phase 1 — Core discovery and controls | Substantially complete |
+| Phase 1 — Formal evidence and HOA adoption | Open and tracked |
+| Phase 2 — Domain and service blueprint | **Completed — v1.0 approved** |
+| Phase 3 — Architecture and repository strategy | **Authorized to begin in ChatGPT** |
+| Phase 4 — Technical implementation | Blocked until Phase 3 approval |
 
 ## Development Workflow
 
@@ -201,7 +213,20 @@ The current implementation has known schema, authorization, auditability, receip
 - the current printed receipt number is not a valid physical receipt-control mechanism;
 - existing migrations encode legacy rules that do not match the approved Phase 1 register.
 
-**Do not deploy the current prototype as a production financial system and do not apply its migrations to a production database without an approved Phase 2 blueprint, Phase 3 technical decision, reviewed migration plan, and verified tests.**
+**Do not deploy the current prototype as a production financial system and do not apply its migrations to a production database without the approved Phase 3 technical decision, reviewed migration plan, and verified tests.**
+
+## Supabase Environment Direction
+
+The current Supabase project under the developer's personal account is a disposable development/prototype environment. It contains no useful production data and no real resident, property, authentication, or financial information requiring migration.
+
+Before production adoption:
+
+- create a clean Association-controlled Supabase organization and project;
+- make the Association responsible for billing;
+- use individual privileged accounts rather than shared credentials;
+- assign at least two Association-designated owners;
+- retain developer access only through an authorized technical-support role;
+- apply only the Phase 3-approved schema, security controls, migrations, tests, backup, and recovery plan.
 
 ## Repository Safety
 
