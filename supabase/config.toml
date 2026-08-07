@@ -1,0 +1,19 @@
+# =============================================================
+# Supabase CLI project configuration
+# WHOA — Wonderland Townhomes Homeowners Association
+#
+# Created by Stage 0 — Containment.
+#
+# Purpose: this repository previously had no CLI configuration at
+# all. The three existing migrations were applied by pasting them
+# into the Supabase SQL Editor (see the header of each file), which
+# is why the hosted migration history is empty while the objects
+# they create already exist.
+#
+# This file is the minimum needed for `supabase link` and
+# `supabase db push` to address the correct project. Local-stack
+# settings (db, studio, realtime, storage) are intentionally
+# omitted — Stage 0 does not introduce local development.
+# =============================================================
+
+project_id = "fgsehrblzpheeghplice"

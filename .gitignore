@@ -26,3 +26,8 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Supabase CLI local artefacts — never commit
+# supabase/config.toml IS tracked; only the CLI's local state is not.
+supabase/.temp/
+supabase/.branches/
