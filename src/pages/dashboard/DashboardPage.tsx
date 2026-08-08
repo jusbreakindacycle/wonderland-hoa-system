@@ -224,9 +224,19 @@ function LastDuesGenerationNotice() {
     )
   }
 
-  const scheduled = data.new_value?.triggered_by === 'scheduled'
-  const month     = data.new_value?.billing_month
-  const inserted  = data.new_value?.dues_inserted
+  const month    = data.new_value?.billing_month
+  const inserted = data.new_value?.dues_inserted
+
+  // Three states, not two. Rows written before DEC-17 carry no `triggered_by`
+  // and always have a NULL actor_id, so their origin genuinely cannot be
+  // recovered — say so, rather than mislabelling a past cron run as an
+  // officer's action. Every row generated from DEC-17 onward is attributed.
+  const attribution =
+    data.new_value?.triggered_by === 'scheduled'
+      ? { label: 'Scheduled', tone: 'text-blue-700 bg-blue-50 border-blue-200' }
+      : data.new_value?.triggered_by === 'officer'
+        ? { label: `By ${data.actor?.full_name ?? 'officer'}`, tone: 'text-gray-600 bg-gray-50 border-gray-200' }
+        : { label: 'Attribution not recorded', tone: 'text-gray-500 bg-gray-50 border-gray-200' }
 
   return (
     <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500">
@@ -236,14 +246,8 @@ function LastDuesGenerationNotice() {
         {month && <> for <span className="font-medium text-gray-700">{month}</span></>}
         {typeof inserted === 'number' && <> · {inserted} created</>}
       </span>
-      <span
-        className={`rounded px-1.5 py-0.5 font-medium border ${
-          scheduled
-            ? 'text-blue-700 bg-blue-50 border-blue-200'
-            : 'text-gray-600 bg-gray-50 border-gray-200'
-        }`}
-      >
-        {scheduled ? 'Scheduled' : `By ${data.actor?.full_name ?? 'officer'}`}
+      <span className={`rounded border px-1.5 py-0.5 font-medium ${attribution.tone}`}>
+        {attribution.label}
       </span>
       {data.new_value?.credits_deferred && (
         <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-700">
