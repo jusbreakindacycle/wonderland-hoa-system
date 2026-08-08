@@ -34,6 +34,7 @@ the task that created this file.
 | [DEC-14](#dec-14) | 2026-08-07 | Recovery objectives RPO ≤ 24h, RTO ≤ 48h | Stage 1 |
 | [DEC-15](#dec-15) | 2026-08-07 | Working association name for receipts | Stage 3 |
 | [DEC-16](#dec-16) | 2026-08-07 | Stage 0 containment remediation | Stage 0 |
+| [DEC-17](#dec-17) | 2026-08-08 | Automatic dues generation reinstated, on a tracked schedule | Stage 0 |
 
 ---
 
@@ -181,3 +182,96 @@ the task that created this file.
 - **Still open after this entry:**
   - `auth_leaked_password_protection` is **disabled**. It is a dashboard/API auth setting, not SQL, and was not changed by this migration.
   - `supabase/functions/generate-monthly-dues/index.ts` accepts unauthenticated `POST` from any origin and calls `generate_monthly_dues` with the service-role key. Its calls will now be rejected by the new guard, which is correct; fixing the Edge Function itself needs its own task.
+
+## DEC-17
+
+- **Date:** 2026-08-08
+- **Decision:** Automatic monthly dues generation is **reinstated**, on the same schedule it ran on before
+  DEC-16 removed it — job `generate-monthly-dues`, cron expression `0 0 1 * *`. Neither the name nor the
+  schedule is changed; there was never anything wrong with either. What was wrong was **where the schedule
+  lived**. It is therefore recreated **inside tracked migration history**, by
+  `supabase/migrations/20260807160901_reinstate_automatic_monthly_dues_generation.sql`, as live SQL with no
+  commented-out alternatives. `supabase db push` is now the only thing that creates it and `git log` is now
+  its history.
+
+  The schedule is made viable by a **postgres-identity carve-out**, not by relaxing the guard:
+
+  ```sql
+  IF session_user <> 'postgres' AND (
+    auth.uid() IS NULL
+    OR has_any_role(ARRAY['admin','president','vice_president','treasurer']) IS NOT TRUE
+  ) THEN
+    RAISE EXCEPTION 'Permission denied: only admin, president, vice president, or treasurer can generate monthly dues.';
+  END IF;
+  ```
+
+  This is an *added path*, not a weakened check. The `IS NOT TRUE` form from DEC-16 is retained verbatim,
+  so the fail-open that DEC-16 closed stays closed. It is explicitly **not** a fail-open NULL check: a
+  JWT-less REST caller is still rejected.
+- **Context / citation:** Owner approval to reverse requirements §5.1 from "officer-triggered only" to
+  "automatic, with mandatory officer notification". DEC-16's `Precondition on application`, which recorded
+  the removal this entry reverses.
+- **Effect:**
+  - **`session_user`, not `current_user`.** The identity test **must** be `session_user`. `current_user`
+    was considered and rejected as a **fail-open**: `generate_monthly_dues` is `SECURITY DEFINER` owned by
+    `postgres` (verified live: `pg_get_userbyid(proowner)` = `postgres`, `prosecdef` = true), and inside a
+    `SECURITY DEFINER` body `current_user` *is the owner*. `current_user <> 'postgres'` would therefore be
+    `FALSE` on every call, short-circuiting the `AND` and making the `RAISE` unreachable — every
+    `authenticated` caller could generate dues. `session_user` is unaffected by both `SET ROLE` and
+    `SECURITY DEFINER`. Verified live: the pre-removal run is still recorded in `cron.job_run_details` with
+    `username = postgres`, and `anon`/`authenticated`/`service_role` are all `rolcanlogin = false`, reachable
+    only by `SET ROLE` from `authenticator` — so **no REST caller can ever present as `postgres`**.
+  - **Credit auto-apply is deferred on scheduled runs.** `generate_monthly_dues` calls `process_payment` to
+    auto-apply unit credits. `process_payment` keeps its strict DEC-16 guard and is deliberately **not**
+    modified, so on a JWT-less scheduled run that nested call raises and would roll the entire transaction
+    back — generating **no dues at all** for the month. The loop is therefore skipped when the run is
+    scheduled, and the run records `credits_applied: 0` with `credits_deferred: true`. No credit is lost:
+    `process_payment` reads and applies unit credit at the start of every payment, so a deferred credit is
+    applied at that unit's next payment or the next officer-triggered generation. If a later task gives
+    `process_payment` its own reviewed carve-out, this deferral should be removed.
+  - **The audit row now distinguishes the two paths.** `actor_id` was hardcoded `NULL` for every run. It now
+    carries `auth.uid()` — `NULL` on a scheduled run, the acting officer's id on a manual one — plus
+    `triggered_by` (`'scheduled'` / `'officer'`) in `new_value` and a human-readable `remarks` string on
+    scheduled runs. This also closes the defect requirements §5.1 item 4 records against
+    `002_billing_engine.sql:357`. **No new column and no new table.** A sentinel UUID was rejected because
+    `audit_logs.actor_id` is `uuid REFERENCES profiles` (`001_initial_schema.sql:159`) and would have
+    required inventing a fake "System" profile row.
+  - **Officer notification is a read-only dashboard indicator.** `src/pages/dashboard/DashboardPage.tsx`
+    surfaced no dues-generation status of any kind before this change. It now reads the most recent
+    `dues.generated` audit row and displays its date, billing month, count, and whether the run was
+    `Scheduled` or by a named officer. It sits under the page header, not inside `SystemConfigPanel` — that
+    panel is gated on `isAdminLevel()`, whereas the header position reaches every role that can open the
+    dashboard (`canViewFinancials()`: additionally treasurer, auditor, board_member), matching the
+    `audit_logs: finance/admin read` policy in `001_initial_schema.sql:462`. This is **not** a notification
+    system; DEC-12 (push notifications) remains Stage 4 and untouched.
+  - **Functions affected:** `generate_monthly_dues` only. `process_payment`, `void_or_waive_due`,
+    `approve_credit_refund` and `preview_payment_allocation` are **not** touched — the carve-out applies to
+    `generate_monthly_dues` alone, and none of those four should ever accept an unauthenticated caller. No
+    table, column, constraint, index or RLS policy is altered. The dues amount, the due-date rule and all
+    allocation logic are unchanged. No `GRANT` or `REVOKE` is issued: privileges survive
+    `CREATE OR REPLACE FUNCTION` and DEC-16 already left this function granted to exactly `authenticated`,
+    `postgres` and `service_role`.
+- **What was explicitly NOT decided:**
+  - The open questions requirements §5.1 raises against dues generation — whether vacant units accrue dues,
+    and whether the 5th-of-following-month due date is adopted policy — are **not** resolved here. Both
+    behaviours are carried over unchanged.
+  - DEC-04 (payor-designated allocation) remains unimplemented. The FIFO loop is untouched; that is Stage 3.
+- **Supersedes:**
+  - The **"officer-triggered, not automatic"** framing in `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md`
+    §5.1. The owner amends that section separately; per §11.3 this log is the amending instrument.
+  - DEC-16's `Precondition on application` clause, insofar as it states that dues generation "then runs from
+    the officer-triggered control in `src/pages/dashboard/DashboardPage.tsx`". That control remains and is
+    unchanged, but it is no longer the only path. The rest of DEC-16 stands in full — in particular its
+    guard repairs, its `search_path` pinning, and its `anon` revocations are all preserved by this entry.
+  - Requirements §3.6's statement that "There is no scheduled dues generation as of 7 August 2026", and the
+    §10 open item it created.
+- **Still open after this entry:**
+  - The migration is authored **UNAPPLIED**. Status is `IMPLEMENTED_UNVERIFIED` until the owner runs
+    `supabase db push` and independently re-verifies — the authoring session had read-only database access,
+    exactly as in DEC-16. Post-apply checks: `cron.job` must show one active `generate-monthly-dues` row with
+    `username = postgres`, and an anon-key REST call to `generate_monthly_dues` must still be rejected.
+  - `supabase/functions/generate-monthly-dues/index.ts` is still an unauthenticated internet-reachable
+    endpoint. It remains correctly rejected — it reaches the database through PostgREST, so its `session_user`
+    is `authenticator`, never `postgres`, and this carve-out does not reopen it. Deleting or gating it is
+    still its own task (requirements §3.7).
+  - `auth_leaked_password_protection` is still **disabled**.
