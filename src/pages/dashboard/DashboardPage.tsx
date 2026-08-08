@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FileText, TrendingUp, AlertTriangle, CreditCard,
-  Wallet, MessageSquare, Users, Settings, RefreshCw,
+  Wallet, MessageSquare, Users, Settings, RefreshCw, CalendarClock,
 } from 'lucide-react'
 import { printDelinquencyReport } from '@/lib/printPDF'
 import toast from 'react-hot-toast'
@@ -122,6 +122,38 @@ function useVisitorActivity() {
   })
 }
 
+// Most recent dues-generation event, read from the audit row that
+// generate_monthly_dues already writes. Read-only: this is how an officer
+// learns a SCHEDULED run happened without having to open the Audit Log page.
+// The `actor:profiles!actor_id(full_name)` embed follows src/hooks/useAuditLogs.ts.
+interface LastDuesGeneration {
+  created_at: string
+  new_value: {
+    billing_month?: string
+    dues_inserted?: number
+    triggered_by?: string
+    credits_deferred?: boolean
+  } | null
+  actor: { full_name: string | null } | null
+}
+
+function useLastDuesGeneration() {
+  return useQuery({
+    queryKey: ['dashboard-last-dues-generation'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('created_at, new_value, actor:profiles!actor_id(full_name)')
+        .eq('action', 'dues.generated')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      return (data ?? null) as unknown as LastDuesGeneration | null
+    },
+  })
+}
+
 function useSystemConfig() {
   return useQuery({
     queryKey: ['system-config'],
@@ -172,6 +204,56 @@ function Section({ title, subtitle, action, children }: {
   )
 }
 
+// Read-only indicator. Sits under the page header rather than inside
+// SystemConfigPanel, which is gated on isAdminLevel() — here it reaches every
+// role that can open the dashboard (canViewFinancials: + treasurer, auditor,
+// board_member), matching the "audit_logs: finance/admin read" RLS policy.
+function LastDuesGenerationNotice() {
+  const { data, isLoading } = useLastDuesGeneration()
+
+  if (isLoading) {
+    return <div className="mt-2 h-5 w-72 bg-gray-100 rounded animate-pulse" />
+  }
+
+  if (!data) {
+    return (
+      <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-400">
+        <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+        No dues generation recorded yet.
+      </p>
+    )
+  }
+
+  const scheduled = data.new_value?.triggered_by === 'scheduled'
+  const month     = data.new_value?.billing_month
+  const inserted  = data.new_value?.dues_inserted
+
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500">
+      <CalendarClock className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+      <span>
+        Dues last generated <span className="font-medium text-gray-700">{fmtDate(data.created_at)}</span>
+        {month && <> for <span className="font-medium text-gray-700">{month}</span></>}
+        {typeof inserted === 'number' && <> · {inserted} created</>}
+      </span>
+      <span
+        className={`rounded px-1.5 py-0.5 font-medium border ${
+          scheduled
+            ? 'text-blue-700 bg-blue-50 border-blue-200'
+            : 'text-gray-600 bg-gray-50 border-gray-200'
+        }`}
+      >
+        {scheduled ? 'Scheduled' : `By ${data.actor?.full_name ?? 'officer'}`}
+      </span>
+      {data.new_value?.credits_deferred && (
+        <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-700">
+          Credits deferred to next payment
+        </span>
+      )}
+    </p>
+  )
+}
+
 function SystemConfigPanel() {
   const qc = useQueryClient()
   const { profile } = useAuthStore()
@@ -204,6 +286,7 @@ function SystemConfigPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] })
       qc.invalidateQueries({ queryKey: ['dashboard-delinquency'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-last-dues-generation'] })
       qc.invalidateQueries({ queryKey: ['dues'] })
       toast.success('Monthly dues generated successfully.')
       setTriggerOpen(false)
@@ -310,6 +393,7 @@ function DashboardContent() {
         <p className="text-sm text-gray-500 mt-0.5">
           {new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
+        <LastDuesGenerationNotice />
       </div>
 
       {/* Summary cards */}
