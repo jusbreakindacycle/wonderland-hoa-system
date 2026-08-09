@@ -35,6 +35,7 @@ the task that created this file.
 | [DEC-15](#dec-15) | 2026-08-07 | Working association name for receipts | Stage 3 |
 | [DEC-16](#dec-16) | 2026-08-07 | Stage 0 containment remediation | Stage 0 |
 | [DEC-17](#dec-17) | 2026-08-08 | Automatic dues generation reinstated, on a tracked schedule | Stage 0 |
+| [DEC-18](#dec-18) | 2026-08-09 | Property-derived login handle, separated from immutable identity | Stage 1 |
 
 ---
 
@@ -275,3 +276,30 @@ the task that created this file.
     is `authenticator`, never `postgres`, and this carve-out does not reopen it. Deleting or gating it is
     still its own task (requirements §3.7).
   - `auth_leaked_password_protection` is still **disabled**.
+
+## DEC-18
+
+- **Date:** 2026-08-09
+- **Decision:** The resident-facing login credential is a **login handle** — HOA-issued, and for homeowners, derived from one currently owned property — not a legal-name-derived username. Canonical normalization: lowercase, remove "St." and spaces, remove the hyphen between the house number and any alphabetic suffix, format `house_no.street_name`. Examples: `115 Sampaguita St.` → `115.sampaguita`; `117-A Sampaguita St.` → `117a.sampaguita`; `111-B Sunflower St.` → `111b.sunflower`.
+
+  The login handle is explicitly **not**:
+  - the person's database identity;
+  - the property's primary key;
+  - an ownership relationship.
+
+  The person's immutable identity is the Supabase Auth user UUID. Historical audit, payment, and receipt records must reference that immutable ID, never the mutable login handle.
+
+  The login handle is mutable by design — an officer may reassign it (e.g. after a property sale) without affecting the person's underlying identity, active sessions, or historical records, because Supabase sessions resolve against the immutable user ID, not the login string.
+
+- **Context / citation:** Owner decision, 9 August 2026, following architectural review of two alternatives (legal-name-derived vs. property-derived) and one refinement (separating immutable identity from mutable handle) before Stage 1 implementation.
+
+- **Effect:**
+  - Stage 1 implements only: accepting and normalizing an already HOA-issued canonical handle for a manually provisioned test account; translating it to the internal Supabase Auth email transport; authenticating; preserving the session; loading the verified profile; displaying the person's actual name post-authentication.
+  - Stage 1 does **not** implement: deriving a handle from a live property record (the `house_no + street` schema is Stage 2 work; `street` does not yet exist as a column), ownership transfer, multi-property switching, handle reassignment, or tenant handle conventions.
+
+- **What was explicitly NOT decided, recorded now as forward constraints:**
+  - **Handle-change mechanism:** changing a login handle means updating the underlying Supabase Auth email field. This must happen through trusted server-side Admin API tooling that sets the field directly — **never** through the resident-facing `supabase.auth.updateUser({ email })` flow, which requires confirmation at both the old and new addresses. Since the underlying address is a synthetic, non-routable `@auth.wonderland.invalid` alias, that confirmation can never arrive — the standard client-facing method will hang indefinitely if used for this purpose. This is a Stage 2+ implementation concern, recorded now so it isn't rediscovered as a bug.
+  - **Vacated-handle reassignment cooldown:** when a handle is vacated (e.g. after a sale), it must not be immediately reassignable to a new owner without a defined cooldown period — otherwise a stale cached credential on an old device could resolve to a different person's account. The specific cooldown duration and reassignment procedure are undecided and belong to Stage 2's ownership-transfer workflow.
+  - Tenant login-handle convention remains fully deferred to Stage 2, since an owner and a tenant cannot share the same property-derived string, and the resolution isn't invented here.
+
+- **Supersedes:** `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §4.1's statement that "the owner username [is] derived from the owner's legal full name" and that the username "identifies a person." The property/person separation principle in §4.1 is retained; only the derivation source and the identity-vs-credential framing change. Also supersedes the legal-name-derived collision convention (`luz.garcia`, `maria.santos`, `maria.santos2`) originally proposed in the Stage 1 Implementation Guide draft, which has been corrected to match this entry.

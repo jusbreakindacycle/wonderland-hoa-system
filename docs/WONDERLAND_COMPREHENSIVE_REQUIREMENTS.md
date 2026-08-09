@@ -284,17 +284,25 @@ This is rendered as "OR No." on a printed document and is **never stored**. It i
 
 `OWNER-DECIDED` Authentication is **username-based**, not email-based.
 
+`SUPERSEDED` — the two rows below are kept struck through, not deleted, so the correction is traceable.
+
+~~| Login identifier | Username | Not an email address |~~
+~~| Owner username | Derived from the owner's legal full name | e.g. `luz.garcia` |~~
+
+`OWNER-DECIDED` (DEC-18, 9 August 2026) The login credential is a **property-derived login handle**, not a legal-name-derived username.
+
 | Concept | Value | Note |
 |---|---|---|
-| Login identifier | Username | Not an email address |
-| Owner username | Derived from the owner's legal full name | e.g. `luz.garcia` |
+| Login identifier | Login handle | HOA-issued, property-derived, not an email address |
+| Handle normalization | lowercase; remove "St." and spaces; remove the hyphen between house number and any alphabetic suffix; format `house_no.street_name` | `115 Sampaguita St.` → `115.sampaguita`; `117-A Sampaguita St.` → `117a.sampaguita` |
+| Immutable person identity | Supabase Auth user UUID | Never the login handle |
 | Unit identifier | `house_no` + `street` | e.g. `113 Sampaguita` — used on receipts, bills, and audit records |
 
-**The critical separation:** the username identifies a *person*; `house_no + street` identifies a *property*. Conflating them was the source of the multi-unit conflict. A person may hold many properties; a property may be held by one owner and occupied by several people.
+**The critical separation, restated under DEC-18:** the login handle is a *mutable credential*, not the person's database identity and not the property's primary key. The person's immutable identity is the Supabase Auth user UUID; historical audit, payment, and receipt records must reference that immutable ID, never the login handle. A person may hold many properties; the login handle anchors to one of them for sign-in purposes only, and an officer may reassign it (e.g. after a sale) without affecting the person's identity, active sessions, or historical records.
 
 `PROPOSED` Email remains an optional profile field for notifications and receipt delivery. It is not a credential.
 
-`OPEN` Username assignment procedure. Who creates the username when a new owner registers — self-service at signup, or officer-issued? What happens on a name collision (two owners named Maria Santos)? Recommended: officer-issued at unit registration, with a numeric suffix on collision.
+`OPEN`, forward constraints recorded in DEC-18 for Stage 2+: the handle-change procedure must use trusted server-side Admin API tooling, never the resident-facing email-change flow (which cannot complete against the synthetic, non-routable internal auth address); a vacated handle needs a defined cooldown before reassignment to a new owner, to prevent a stale cached credential resolving to a different person's account; the tenant login-handle convention remains fully undecided, since an owner and a tenant cannot share the same property-derived string.
 
 ### 4.2 Address model
 
