@@ -519,7 +519,7 @@ Required elements:
 | Reconciling officer name **and position** | Captured at reconciliation time; immutable thereafter |
 | Reconciliation status | |
 
-`PROPOSED` Visual treatment: maroon (`#8B3A3A`) as the primary brand colour drawn from the logo, with a distinct visual treatment for the verification block. Logo at 80×80px in the receipt header. Output as PDF, A4, print-friendly.
+`SUPERSEDED` (DEC-19) — ~~maroon (`#8B3A3A`) as the primary brand colour drawn from the logo~~. That value was estimated by eye, not measured. `PROPOSED` Visual treatment: maroon (`#752229`, measured directly from the logo file, per DEC-19) as the primary brand colour, with a distinct visual treatment for the verification block. Logo at 80×80px in the receipt header. Output as PDF, A4, print-friendly.
 
 ### 6.5 Receipt numbering
 

@@ -36,6 +36,7 @@ the task that created this file.
 | [DEC-16](#dec-16) | 2026-08-07 | Stage 0 containment remediation | Stage 0 |
 | [DEC-17](#dec-17) | 2026-08-08 | Automatic dues generation reinstated, on a tracked schedule | Stage 0 |
 | [DEC-18](#dec-18) | 2026-08-09 | Property-derived login handle, separated from immutable identity | Stage 1 |
+| [DEC-19](#dec-19) | 2026-08-09 | Measured brand colour values authorised as canonical; supersedes Requirements §6.4's estimated value | Stage 1 |
 
 ---
 
@@ -303,3 +304,29 @@ the task that created this file.
   - Tenant login-handle convention remains fully deferred to Stage 2, since an owner and a tenant cannot share the same property-derived string, and the resolution isn't invented here.
 
 - **Supersedes:** `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §4.1's statement that "the owner username [is] derived from the owner's legal full name" and that the username "identifies a person." The property/person separation principle in §4.1 is retained; only the derivation source and the identity-vs-credential framing change. Also supersedes the legal-name-derived collision convention (`luz.garcia`, `maria.santos`, `maria.santos2`) originally proposed in the Stage 1 Implementation Guide draft, which has been corrected to match this entry.
+
+## DEC-19
+
+- **Date:** 2026-08-09
+- **Decision:** The brand colour values measured directly from the official
+  logo file are authorised as canonical:
+
+  - `brandPrimary` (maroon) = `#752229`
+  - `brandSecondary` (navy) = `#15365A`
+
+  `docs/ux/WONDERLAND_MOBILE_UX_FOUNDATION.md` §5.1 is the single owner of
+  these values going forward. Both were derived by pixel-level analysis of
+  the logo file (median of the solid maroon and navy regions), not
+  estimated by eye.
+
+- **Context / citation:** Requirements §6.4 previously stated `#8B3A3A` for
+  maroon, estimated by eye during earlier drafting. The UX Foundation
+  document's design-token audit flagged the conflict rather than silently
+  introducing a third value.
+
+- **Effect:** Requirements §6.4 is corrected to reference the measured
+  value and mark the old estimate `SUPERSEDED`. This correction has been
+  applied directly to `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md`
+  outside this task.
+
+- **Supersedes:** Requirements §6.4's `#8B3A3A` estimate.
