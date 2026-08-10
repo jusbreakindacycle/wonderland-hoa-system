@@ -116,9 +116,12 @@ describe('login submission', () => {
 
     await act(async () => {
       fireEvent.press(screen.getByTestId('login-submit'));
+      // Allow microtasks to complete
+      await Promise.resolve();
       await Promise.resolve();
     });
 
+    // Now check the props — the component has re-rendered with loading state
     const submit = screen.getByTestId('login-submit');
     expect(submit.props.accessibilityState.disabled).toBe(true);
     expect(submit.props.accessibilityState.busy).toBe(true);
