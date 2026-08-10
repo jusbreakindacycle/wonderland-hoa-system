@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Wonderland HOA",
+    "slug": "wonderland-hoa",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "wonderlandhoa",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#FAF9F7",
+    "platforms": [
+      "android"
+    ],
+    "android": {
+      "package": "ph.wonderlandtownhomes.hoa",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF9F7",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FAF9F7",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160
+        }
+      ],
+      "expo-secure-store",
+      "expo-font",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

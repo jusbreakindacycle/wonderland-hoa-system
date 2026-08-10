@@ -5,6 +5,10 @@ node_modules/
 dist/
 dist-ssr/
 
+# Stage 1 mobile — Expo scaffold seed and CI bundle output are never committed
+.stage1-expo-seed/
+mobile/dist-ci/
+
 # env files — never commit real credentials
 .env
 .env.local
