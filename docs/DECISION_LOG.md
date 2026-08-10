@@ -38,6 +38,7 @@ the task that created this file.
 | [DEC-18](#dec-18) | 2026-08-09 | Property-derived login handle, separated from immutable identity | Stage 1 |
 | [DEC-19](#dec-19) | 2026-08-09 | Measured brand colour values authorised as canonical; supersedes Requirements §6.4's estimated value | Stage 1 |
 | [DEC-20](#dec-20) | 2026-08-09 | Transitional legacy web operations bridge (S1-D4); no resident self-registration | Stage 1 |
+| [DEC-21](#dec-21) | 2026-08-10 | Android application id `ph.wonderlandtownhomes.hoa` (S1-D2) | Stage 1 |
 
 ---
 
@@ -397,3 +398,39 @@ the task that created this file.
 - **Still open after this entry:**
   - S1-D3, the officer-assisted account-recovery procedure, required before resident pilot or
     production rollout (Guide §10.9). Stage 1 ships only a "Contact the HOA" message.
+
+## DEC-21
+
+- **Date:** 2026-08-10
+- **Decision:** The Android application id is **`ph.wonderlandtownhomes.hoa`**, recorded in
+  `mobile/app.json` under `android.package`. This closes S1-D2.
+
+  The form is deliberate:
+
+  - `ph` — the association's country, and a namespace the association legitimately sits in;
+  - `wonderlandtownhomes` — the organisation segment, matching the working association name in
+    [DEC-15](#dec-15) (*Wonderland Townhomes Homeowners Association, Inc.*);
+  - `hoa` — the application.
+
+  A `com.`-prefixed alternative was rejected: reverse-DNS under `com.` asserts control of a
+  matching domain, and the association does not hold `wonderlandhoa.com`.
+
+- **Context / citation:** Stage 1 Implementation Guide §14.4 requires the application id to be
+  approved before the first EAS build intended to carry the long-term application identity, and
+  §24 (S1-D2) leaves it open. Owner decision, 10 August 2026.
+
+- **Effect:**
+  - `mobile/app.json` sets `android.package` to this value, with `versionCode` 1.
+  - The value is treated as permanent. Changing an application id after store distribution
+    forces a new Play listing and orphans every existing install, so it is not edited casually.
+  - iOS bundle identifier is **not** decided here. iOS is deferred, not descoped
+    ([DEC-03](#dec-03)), and no iOS artefact exists to name.
+
+- **What was explicitly NOT decided:**
+  - The Play Store listing name, the developer account that will own it, or any release track.
+    Stage 1 performs no Play Store submission.
+  - The production Supabase project the released app will point at. Stage 1 builds target the
+    existing development project `fgsehrblzpheeghplice`, whose retirement is governed by
+    [DEC-11](#dec-11).
+
+- **Supersedes:** None. S1-D2 was open, not previously answered.
