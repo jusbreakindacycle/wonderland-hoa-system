@@ -110,7 +110,20 @@ provably the same one that shipped on `main`.
 | `npx expo lint` | Passes, 0 problems |
 | `npx jest --ci --runInBand` | **5 suites, 70 tests passing** |
 | `npx expo export --platform android` | Passes — Android Hermes bundle 3.5 MB |
-| `npx expo-doctor@latest` | 19 of 20 checks pass. The one failure is the remote **Expo config schema** check, which needs a live connection to the Expo API and failed with `Client network socket disconnected before secure TLS connection was established` on two attempts. This is a network condition on this machine, not a project defect; it should pass in CI. |
+| `npx expo-doctor@latest` | 19 of 20 checks pass locally. The one failure is the remote **Expo config schema** check, which needs a live connection to the Expo API and failed with `Client network socket disconnected before secure TLS connection was established` on two attempts. This is a network condition on this machine, not a project defect — **it passes in CI**, where all 20 checks succeed (§3.1). |
+
+### 3.1 CI — both jobs green (acceptance Scenario G)
+
+Run 22 on `feat/stage-1-mobile-foundation` @ `12e6eee`:
+<https://github.com/jusbreakindacycle/wonderland-hoa-system/actions/runs/31393381787>
+
+| Job | Result |
+|---|---|
+| Legacy web bridge | **success** — `npm ci`, typecheck, lint, Vitest, Vite build |
+| Mobile foundation | **success** — `npm ci`, `expo-doctor` (all 20 checks), typecheck, lint, Jest, Android export |
+
+This satisfies acceptance Scenario G in full: both clients verify independently, and the mobile
+addition required no deletion or disabling of the root web application.
 
 ### Test coverage against Guide §13.1
 
