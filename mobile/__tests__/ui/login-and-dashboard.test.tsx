@@ -111,17 +111,23 @@ describe('login submission', () => {
     renderWithAuth(<LoginForm />);
     await waitFor(() => expect(screen.getByTestId('login-screen')).toBeTruthy());
 
+    // Let the boot-time session resolve settle before interacting. Otherwise it
+    // lands mid-sign-in and overwrites `signingIn` with `signedOut`. The app
+    // itself cannot hit this: the splash gate holds the login screen back until
+    // boot has settled (Guide §8.2). This test renders LoginForm ungated, so it
+    // has to wait explicitly.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     fireEvent.changeText(screen.getByTestId('login-username'), '115.sampaguita');
     fireEvent.changeText(screen.getByTestId('login-password'), 'secret');
 
     await act(async () => {
       fireEvent.press(screen.getByTestId('login-submit'));
-      // Allow microtasks to complete
-      await Promise.resolve();
       await Promise.resolve();
     });
 
-    // Now check the props — the component has re-rendered with loading state
     const submit = screen.getByTestId('login-submit');
     expect(submit.props.accessibilityState.disabled).toBe(true);
     expect(submit.props.accessibilityState.busy).toBe(true);
@@ -153,7 +159,9 @@ describe('dashboard', () => {
   beforeEach(async () => {
     mock.givenSession(activeProfile());
     renderWithAuth(<DashboardScreen />);
-    await waitFor(() => expect(screen.getByTestId('dashboard-screen')).toBeTruthy());
+    // `dashboard-screen` renders before the profile resolves, so waiting on it
+    // proves nothing. Wait for profile-dependent content instead.
+    await waitFor(() => expect(screen.getByText('Luz Garcia')).toBeTruthy());
   });
 
   it('renders without any domain data', () => {

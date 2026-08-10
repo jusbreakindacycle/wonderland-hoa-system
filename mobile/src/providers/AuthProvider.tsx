@@ -159,6 +159,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     async (username: string, password: string): Promise<void> => {
+      // Claim a new run id so a still-in-flight boot resolve becomes stale and
+      // cannot land on top of this sign-in. Without this, a slow boot-time
+      // getSession can overwrite `signingIn` with `signedOut` mid-attempt.
+      runIdRef.current += 1;
       setSignInError(null);
       setStatus('signingIn');
 
