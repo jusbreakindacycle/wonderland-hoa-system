@@ -9,7 +9,12 @@ import jsxA11y from 'eslint-plugin-jsx-a11y'
 
 export default [
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**'],
+    // `mobile/**` is the Stage 1 Expo application. It is a separate client
+    // with its own package.json, its own toolchain and its own flat config at
+    // `mobile/eslint.config.js`, and CI lints it as its own job (DEC-20).
+    // Without this ignore, root `eslint .` walks into it and reports on Expo's
+    // config files under rules written for the browser bundle.
+    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'mobile/**'],
   },
 
   js.configs.recommended,

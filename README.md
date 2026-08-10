@@ -20,9 +20,54 @@ Covered internal streets:
 
 The operational address model uses separate **house number** and **official street** values. It does not use phase, block, or lot.
 
-## Current Repository
+## Repository Layout — Transitional Dual Client
 
-The existing codebase is a legacy operating prototype built with:
+As of Stage 1 the repository holds **two client applications at once**. This is a temporary
+transitional layout, not a permanent product architecture, and not a reversal of the mobile-only
+direction in [DEC-01](docs/DECISION_LOG.md#dec-01).
+
+```text
+.                      React + Vite officer operations bridge  (legacy, transitional)
+├─ src/                its application code
+├─ index.html          its entry point
+├─ vite.config.ts      its build config
+├─ package.json        its dependencies and scripts
+│
+└─ mobile/             React Native + Expo application  (the target product)
+   ├─ app/             Expo Router routes
+   ├─ src/             screens, features, theme, Supabase client
+   ├─ assets/          brand assets
+   ├─ package.json     its own dependencies, scripts and lockfile
+   └─ .env.example     its own environment contract
+```
+
+Each client installs, typechecks, lints, tests and builds independently, and CI runs them as two
+separate jobs. Neither imports source from the other. There is deliberately **no** npm workspace,
+Turborepo or Nx layout — the second directory exists for operational continuity, not architecture
+expansion.
+
+### The web application is a temporary operations bridge
+
+Per [DEC-20](docs/DECISION_LOG.md#dec-20) (S1-D4), the React/Vite application is retained as
+internal HOA officer tooling while the mobile replacement is built. Officers still depend on it,
+and automatic monthly dues generation ([DEC-17](docs/DECISION_LOG.md#dec-17)) still runs against
+the workflows it exposes.
+
+While the bridge stands:
+
+- it must remain runnable, and Stage 1 must not remove an existing officer workflow;
+- it receives **only** security, compatibility, or operational fixes — no new product work;
+- new product functionality goes to `mobile/`.
+
+**Completing Stage 1 does not authorise retiring it.** Retirement requires a verified mobile
+replacement for every still-required officer workflow, acceptance testing of those workflows, a
+cutover audit finding no operational gap, confirmation that financial operations can continue
+safely, and an explicit owner-approved decision recorded in the Decision Log. Until all five hold,
+the bridge is part of the operational safety boundary.
+
+## Current Repository — legacy officer bridge
+
+The root codebase is a legacy operating prototype built with:
 
 - React 18
 - Vite
@@ -200,6 +245,100 @@ npm run preview
 ```
 
 The legacy audit found no automated tests or CI/CD pipeline, and the lint configuration is incomplete. A successful command should not be assumed until it is executed and verified in the current environment.
+
+## Local Setup — Mobile Application (Stage 1)
+
+The Expo application under `mobile/` is the target product. It is **Android-first**
+([DEC-03](docs/DECISION_LOG.md#dec-03)); iOS is deferred, not descoped, and no iOS artefact is
+required.
+
+### Prerequisites
+
+- Node.js 24
+- npm
+- An Android device with Expo Go or a development build, or an Android emulator
+- An Expo account, for EAS builds only
+
+### Install
+
+```bash
+cd mobile
+npm ci
+```
+
+The mobile application has its own `package.json` and `package-lock.json`. Do **not** run `npm`
+for it from the repository root, and do not add mobile packages to the root manifest.
+
+### Environment variables
+
+```bash
+cd mobile
+cp .env.example .env
+```
+
+`mobile/.env` is git-ignored. Fill in:
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key-here
+EXPO_PUBLIC_AUTH_EMAIL_DOMAIN=auth.wonderland.invalid
+```
+
+Every variable here is `EXPO_PUBLIC_*` and is therefore embedded in the shipped bundle. Only the
+project URL and a **publishable** key belong in it. A service-role key, secret API key, database
+password, admin access token, or Expo personal access token must never appear in `mobile/.env`, in
+source, in EAS public variables, or in a bundled asset.
+
+The root web bridge keeps its own separate `VITE_*` variables. The two environment files stay
+separate — privileged credentials must not move into a shared root/mobile file.
+
+### Run on Android
+
+```bash
+cd mobile
+npm run android      # start Metro and open on a connected device or emulator
+npm start            # start Metro only
+```
+
+### Available mobile scripts
+
+```bash
+npm run typecheck    # tsc --noEmit
+npm run lint         # expo lint
+npm run test         # jest --watch
+npm run test:ci      # jest --ci --runInBand
+npm run doctor       # expo-doctor dependency check
+```
+
+### Android builds (EAS)
+
+EAS requires an interactive login and is not run by CI. From `mobile/`:
+
+```bash
+npx eas-cli@latest login
+npx eas-cli@latest build:configure
+npx eas-cli@latest build --platform android --profile preview
+```
+
+Profiles `development`, `preview` and `production` are configured in `mobile/eas.json`. The
+`development` profile expects a development client — run `npx expo install expo-dev-client`
+before using it. Stage 1 only requires an Android `development` or `preview` build; no Play Store
+release is performed.
+
+The approved Android application id is `ph.wonderlandtownhomes.hoa`
+([DEC-21](docs/DECISION_LOG.md#dec-21)). Changing it after store distribution is consequential, so
+it is not to be edited casually.
+
+### Resident accounts
+
+Residents do not self-register ([DEC-20](docs/DECISION_LOG.md#dec-20)). The HOA verifies the
+person, provisions the account, assigns the login handle and issues the credentials; the resident
+then signs in. The mobile application exposes **Log In** only.
+
+The login credential is a property-derived **login handle**
+([DEC-18](docs/DECISION_LOG.md#dec-18)) — for example `115.sampaguita` — not an email address and
+not the person's legal name. The application converts it to an internal, non-routable Supabase Auth
+email alias purely as a transport; residents never see that alias.
 
 ## Security and Production Warning
 

@@ -37,6 +37,8 @@ the task that created this file.
 | [DEC-17](#dec-17) | 2026-08-08 | Automatic dues generation reinstated, on a tracked schedule | Stage 0 |
 | [DEC-18](#dec-18) | 2026-08-09 | Property-derived login handle, separated from immutable identity | Stage 1 |
 | [DEC-19](#dec-19) | 2026-08-09 | Measured brand colour values authorised as canonical; supersedes Requirements §6.4's estimated value | Stage 1 |
+| [DEC-20](#dec-20) | 2026-08-09 | Transitional legacy web operations bridge (S1-D4); no resident self-registration | Stage 1 |
+| [DEC-21](#dec-21) | 2026-08-10 | Android application id `ph.wonderlandtownhomes.hoa` (S1-D2) | Stage 1 |
 
 ---
 
@@ -330,3 +332,105 @@ the task that created this file.
   outside this task.
 
 - **Supersedes:** Requirements §6.4's `#8B3A3A` estimate.
+
+## DEC-20
+
+- **Date:** 2026-08-09
+- **Decision:** Two Stage 1 rules, recorded before implementation per Stage 1 Implementation
+  Guide §15.2.
+
+  **1. The existing React/Vite application is retained as a transitional internal HOA officer
+  operations bridge (S1-D4).** It is *not* a second target product and does not reverse DEC-01's
+  mobile-only re-founding. It exists to prevent an operational gap while the mobile replacement
+  is built.
+
+  Rules for the duration of the transition:
+
+  - the root Vite application remains runnable — `src/`, `index.html`, `vite.config.ts`, the root
+    `package.json` and `package-lock.json`, the web test setup, and the web dependencies all stay;
+  - Stage 1 must not intentionally remove or break an existing officer operational workflow
+    (dashboard, units, dues, payments, complaints, visitors, announcements, audit);
+  - no new product functionality targets the legacy web client — it receives only security,
+    compatibility, or operational fixes required to keep the bridge safe and usable;
+  - the mobile application is built separately under `mobile/`, with no relative imports between
+    the two clients;
+  - no npm workspace, Turborepo, or Nx layout is introduced merely because two clients
+    temporarily coexist.
+
+  **Completion of Stage 1 is not authorisation to retire the web bridge.** Retirement requires
+  all five of:
+
+  1. every still-required officer workflow has a verified mobile replacement;
+  2. those mobile workflows pass acceptance testing;
+  3. a cutover audit finds no operational gap;
+  4. required financial operations can continue safely after removal;
+  5. the owner explicitly approves retirement and records the decision here.
+
+  **2. Residents do not self-register.** The HOA verifies the person, provisions the account,
+  assigns the login handle, and issues the credentials; the resident then signs in. The resident
+  mobile UI exposes **Log In** only — no `Sign Up`, `Register`, or `Create Account` surface, and
+  no reachable call to `supabase.auth.signUp` from resident-facing code. Production provisioning
+  must run through a trusted server-side/admin path; a service-role or secret key is never
+  embedded in the mobile client.
+
+- **Context / citation:** Stage 1 Implementation Guide §3.3, §10.4, §10.7, §15.2 and §24 (S1-D1,
+  S1-D4). DEC-18 established that the login handle is HOA-issued but did not state the
+  no-self-registration rule as a closed decision; this entry states it.
+
+- **Effect:**
+  - The Stage 1 branch adds `mobile/` alongside the existing web application rather than
+    replacing it. Root web CI verification is retained and runs as its own job.
+  - The only root-level changes Stage 1 makes are the ones required to keep the bridge's own
+    checks green alongside a second client (an ESLint ignore for `mobile/**`, `.gitignore`
+    entries, the CI job split) plus README documentation. No file under `src/` or `supabase/` is
+    modified.
+  - The resident mobile application ships sign-in only.
+
+- **What was explicitly NOT decided:**
+  - The cutover date, the parity checklist contents, and which officer workflows are
+    "still required" at cutover time. Those belong to the cutover audit, not here.
+  - Whether any officer capability eventually lands in the mobile app as an officer surface or in
+    a separate officer client. Stage 1 builds neither.
+
+- **Supersedes:** Nothing. DEC-01 stands in full — this entry constrains the *timing* of web
+  removal, not the mobile-only direction.
+
+- **Still open after this entry:**
+  - S1-D3, the officer-assisted account-recovery procedure, required before resident pilot or
+    production rollout (Guide §10.9). Stage 1 ships only a "Contact the HOA" message.
+
+## DEC-21
+
+- **Date:** 2026-08-10
+- **Decision:** The Android application id is **`ph.wonderlandtownhomes.hoa`**, recorded in
+  `mobile/app.json` under `android.package`. This closes S1-D2.
+
+  The form is deliberate:
+
+  - `ph` — the association's country, and a namespace the association legitimately sits in;
+  - `wonderlandtownhomes` — the organisation segment, matching the working association name in
+    [DEC-15](#dec-15) (*Wonderland Townhomes Homeowners Association, Inc.*);
+  - `hoa` — the application.
+
+  A `com.`-prefixed alternative was rejected: reverse-DNS under `com.` asserts control of a
+  matching domain, and the association does not hold `wonderlandhoa.com`.
+
+- **Context / citation:** Stage 1 Implementation Guide §14.4 requires the application id to be
+  approved before the first EAS build intended to carry the long-term application identity, and
+  §24 (S1-D2) leaves it open. Owner decision, 10 August 2026.
+
+- **Effect:**
+  - `mobile/app.json` sets `android.package` to this value, with `versionCode` 1.
+  - The value is treated as permanent. Changing an application id after store distribution
+    forces a new Play listing and orphans every existing install, so it is not edited casually.
+  - iOS bundle identifier is **not** decided here. iOS is deferred, not descoped
+    ([DEC-03](#dec-03)), and no iOS artefact exists to name.
+
+- **What was explicitly NOT decided:**
+  - The Play Store listing name, the developer account that will own it, or any release track.
+    Stage 1 performs no Play Store submission.
+  - The production Supabase project the released app will point at. Stage 1 builds target the
+    existing development project `fgsehrblzpheeghplice`, whose retirement is governed by
+    [DEC-11](#dec-11).
+
+- **Supersedes:** None. S1-D2 was open, not previously answered.

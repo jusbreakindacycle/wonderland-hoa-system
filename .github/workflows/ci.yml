@@ -1,5 +1,11 @@
 name: CI
 
+# Two clients coexist in this repository during Stage 1 (DEC-20 / S1-D4):
+# the legacy React/Vite officer operations bridge at the root, and the new
+# Expo application under `mobile/`. Both are verified independently — mobile
+# work must never be allowed to break the bridge officers still depend on
+# (Stage 1 Implementation Guide §14.2).
+
 on:
   push:
     branches: ['**']
@@ -13,16 +19,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Typecheck, lint, test, build
+  legacy-web:
+    name: Legacy web bridge
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
@@ -41,3 +47,45 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  mobile:
+    name: Mobile foundation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Expo dependency check
+        run: npx expo-doctor@latest
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test:ci
+
+      # Proves the Android JS bundle actually builds. This is not an EAS build
+      # and produces no installable artifact; `mobile/dist-ci` is git-ignored.
+      - name: Verify Android bundle
+        run: npx expo export --platform android --output-dir dist-ci
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+          EXPO_PUBLIC_AUTH_EMAIL_DOMAIN: auth.wonderland.invalid
