@@ -1,11 +1,10 @@
 # Wonderland HOA System — Stage 2 Architecture Decisions
 
 **Date:** 2026-08-12  
-**Stage 1 Merge Commit:** `8e28502`  
+**Stage 2 Merge Commit:** `3c02da9`  
 **Authority Sources:**
 - `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4
 - `docs/DECISION_LOG.md` DEC-18, DEC-20
-- `WONDERLAND_TASK_AUDIT_HOUSE_NO_CONSTRAINT.md` (Stage 1 output)
 - `docs/ux/WONDERLAND_STAGE_1_IMPLEMENTATION_GUIDE.md` §11.5
 
 ---
@@ -309,9 +308,9 @@ When the database migration and code is ready, verify each decision:
 
 ## References
 
-1. **Comprehensive Requirements:** `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2.1 (units), §3.5 (occupancy—marked OPEN for Stage 2 to solve)
-2. **Decision Log:** `docs/DECISION_LOG.md` DEC-18 (handle derivation), DEC-20 (HOA-provisioned, no self-registration)
-3. **Stage 1 Audit:** `WONDERLAND_TASK_AUDIT_HOUSE_NO_CONSTRAINT.md` (justifies street-column addition)
+1. **Comprehensive Requirements:** `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2.1 (units), §3.5 (occupancy—marked OPEN for Stage 2 to solve), §4.2 (address model)
+2. **Decision Log:** `docs/DECISION_LOG.md` DEC-18 (handle derivation, street format), DEC-20 (HOA-provisioned, no self-registration)
+3. **Stage 1 Implementation Guide:** `docs/WONDERLAND_STAGE_1_IMPLEMENTATION_GUIDE.md` §11.5 (auth context)
 4. **Legal Basis:** RA 9904 (Homeowners Association Act of 2004), §23 (officers and governance)
 
 ---

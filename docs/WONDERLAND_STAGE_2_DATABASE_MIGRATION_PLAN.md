@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12  
 **Target Database:** Supabase PostgreSQL (HOA project)  
-**Authority:** `WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4, `DECISION_LOG.md` DEC-18/DEC-20, `WONDERLAND_TASK_AUDIT_HOUSE_NO_CONSTRAINT.md`, `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21 through DEC-24)  
+**Authority:** `WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4, `DECISION_LOG.md` DEC-18/DEC-20, `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21 through DEC-24)  
 **Status:** Ready for implementation in Claude Code (Opus 5, Extra High effort, Plan mode)
 
 ---
@@ -12,10 +12,11 @@
 Before running any SQL, verify:
 
 - [ ] You have a **backup** of the production database (Supabase project)
-- [ ] You have read the `WONDERLAND_TASK_AUDIT_HOUSE_NO_CONSTRAINT.md` audit report
-- [ ] You have obtained **street addresses for the six units with missing street data** from the HOA officer (see **§4: Backfill Data Collection** below)
-- [ ] All developers have pulled the latest `main` (commit `8e28502` or later)
+- [ ] You have confirmed the **5 authoritative street names** (Sampaguita, Sunflower, Wonderland Avenue, Yellowbell, Orchids — Circle is excluded)
+- [ ] You understand that existing test data (house_no 113, 115, 165, 167, 16A, 13B) will be replaced during Phase 1 backfill
+- [ ] All developers have pulled the latest `main` (commit `3c02da9` or later — Stage 2 docs commit)
 - [ ] No other migrations are in flight
+- [ ] `officers` table exists with a `role` column (for super-admin RLS checks in Phase 6)
 
 ---
 
@@ -82,20 +83,20 @@ CREATE TABLE occupancies (
 
 ### Phase 3: Populate `occupancies` from Current Data
 
-**Current state (hypothetical schema before Stage 2):**
+**Current state (actual schema verified in production):**
 
-Assuming the schema has a `homeowners.primary_unit_id` or similar linking homeowners to units, migrate to occupancies:
+The `homeowners` table has a direct FK `unit_id` linking homeowners to units. Migrate all active homeowners to occupancies:
 
 ```sql
 INSERT INTO occupancies (homeowner_id, unit_id, move_in_date, created_at)
 SELECT 
   h.id,
-  h.primary_unit_id,  -- or however unit is currently linked
-  COALESCE(h.hoa_join_date, '2020-01-01'::DATE),  -- Use HOA join date or default
+  h.unit_id,  -- Direct FK column
+  COALESCE(h.move_in_date, '2020-01-01'::DATE),  -- Use move_in_date or default
   NOW()
 FROM homeowners h
-WHERE h.primary_unit_id IS NOT NULL
-  AND h.status IN ('active', 'inactive')  -- Exclude deleted users
+WHERE h.unit_id IS NOT NULL
+  AND h.is_active = true  -- Only active homeowners
 ON CONFLICT DO NOTHING;  -- Safety: if already exists, skip
 ```
 
@@ -216,64 +217,52 @@ COMMENT ON COLUMN occupancies.ended_by_officer IS
 
 ### Phase 3: Populate `occupancies` from Existing Homeowner-Unit Links
 
-**Assumption:** The existing schema has a way to link homeowners to units (e.g., `homeowners.primary_unit_id`, or a separate `homeowner_units` table).
+**Actual Schema:** The existing `homeowners` table has a direct FK `unit_id` linking each homeowner to their unit.
 
-**Option A: Single unit per homeowner (simple migration)**
+**Migration SQL:**
 
 ```sql
 INSERT INTO occupancies (homeowner_id, unit_id, move_in_date, created_at)
 SELECT 
   h.id,
-  h.primary_unit_id,
-  COALESCE(h.hoa_join_date, h.created_at::DATE, '2020-01-01'::DATE) as move_in_date,
+  h.unit_id,  -- ← Direct FK column (verified in production Supabase)
+  COALESCE(h.move_in_date, '2020-01-01'::DATE) as move_in_date,
   CURRENT_TIMESTAMP
 FROM homeowners h
-WHERE h.primary_unit_id IS NOT NULL
-  AND h.status NOT IN ('deleted')  -- Exclude deleted users
+WHERE h.unit_id IS NOT NULL
+  AND h.is_active = true
   AND NOT EXISTS (
     SELECT 1 FROM occupancies occ
-    WHERE occ.homeowner_id = h.id AND occ.unit_id = h.primary_unit_id
+    WHERE occ.homeowner_id = h.id AND occ.unit_id = h.unit_id
   )  -- Prevent re-insertion if already exists
-;
+ON CONFLICT DO NOTHING;  -- Safety: if already exists, skip
 
 -- Verify the migration:
-SELECT COUNT(*) FROM occupancies;  -- Should match or exceed number of active homeowners
+SELECT COUNT(*) FROM occupancies;  -- Should match number of active homeowners with units
 ```
 
-**Option B: Multiple units per homeowner (if historical data exists)**
-
-If homeowners can own multiple units and that's tracked elsewhere (e.g., `homeowner_units` junction table), iterate and create one occupancy row per (homeowner, unit) pair:
-
-```sql
-INSERT INTO occupancies (homeowner_id, unit_id, move_in_date, created_at)
-SELECT 
-  hu.homeowner_id,
-  hu.unit_id,
-  COALESCE(hu.acquire_date, h.hoa_join_date, '2020-01-01'::DATE) as move_in_date,
-  CURRENT_TIMESTAMP
-FROM homeowner_units hu
-JOIN homeowners h ON h.id = hu.homeowner_id
-WHERE hu.status NOT IN ('deleted')
-  AND NOT EXISTS (
-    SELECT 1 FROM occupancies occ
-    WHERE occ.homeowner_id = hu.homeowner_id AND occ.unit_id = hu.unit_id
-  )
-;
-```
+**Rationale:**
+- `homeowners.unit_id` is the direct FK to units (verified in production Supabase)
+- `homeowners.move_in_date` is used as the occupancy start date (not `hoa_join_date`)
+- Only active homeowners are migrated (`is_active = true`)
+- Conflict handling prevents duplicate insertion if this runs twice
 
 **Post-Migration Verification:**
 
 ```sql
--- Check that every current homeowner has at least one occupancy row
+-- Check that every active homeowner has at least one occupancy row
 SELECT COUNT(*) as homeowners_with_current_occupancy
 FROM homeowners h
-WHERE EXISTS (
-  SELECT 1 FROM occupancies occ
-  WHERE occ.homeowner_id = h.id AND occ.move_out_date IS NULL
-);
+WHERE h.is_active = true
+  AND EXISTS (
+    SELECT 1 FROM occupancies occ
+    WHERE occ.homeowner_id = h.id AND occ.move_out_date IS NULL
+  );
 
--- Should be close to or equal to:
-SELECT COUNT(*) as active_homeowners FROM homeowners WHERE status = 'active';
+-- Should match or closely align with:
+SELECT COUNT(*) as active_homeowners_with_units 
+FROM homeowners 
+WHERE is_active = true AND unit_id IS NOT NULL;
 ```
 
 ### Phase 4: Add Indexes
@@ -555,53 +544,51 @@ CREATE POLICY "no_delete_occupancies"
 
 ## Section 4: Backfill Data Collection
 
-### Six Units with Missing Street Data
+### Authoritative Street List (Decided)
 
-From `WONDERLAND_TASK_AUDIT_HOUSE_NO_CONSTRAINT.md`:
+The following 5 streets are confirmed as the complete list for Wonderland HOA:
 
-The following units have no known street data in the current system:
+| Street | Status | Source |
+|--------|--------|--------|
+| Sampaguita | ✅ Confirmed | DECISION_LOG.md DEC-18 |
+| Sunflower | ✅ Confirmed | DECISION_LOG.md DEC-18 |
+| Wonderland Avenue | ✅ Confirmed | Legacy reconciliation docs |
+| Yellowbell | ✅ Confirmed | Legacy reconciliation docs |
+| Orchids | ✅ Confirmed | Legacy reconciliation docs |
+| **Circle** | ❌ **Excluded** | Explicitly not used |
 
-| House No | Current Status | Street Address (TO BE PROVIDED BY OFFICER) |
-|----------|-----------------|-------------------------------------------|
-| 113      | Active          | _____________________________________________ |
-| 115      | Active          | _____________________________________________ |
-| 118      | Active          | _____________________________________________ |
-| 124      | Active          | _____________________________________________ |
-| 128      | Active          | _____________________________________________ |
-| 130      | Active          | _____________________________________________ |
+**No officer input required.** Street list is already decided. Use these 5 streets for Phase 1a backfill.
 
-### Officer Input Form (Use This to Collect Data)
+### Backfill Strategy
 
-**To the HOA Officer:**
+Current test data in the `units` table (house_no: 113, 115, 165, 167, 16A, 13B) will be **replaced** during Phase 1a backfill. This is acceptable since the test data is manually created and non-production.
 
-Before Stage 2 implementation begins, please provide the street address for each of these units. Provide the full street name (e.g., "Sampaguita", "Mahogany", "Acacia").
-
-Once you provide this, the migration team will backfill the database automatically.
-
-**Input method:**
-1. Print or screenshot this table
-2. Fill in the "Street Address" column by hand or email
-3. Send to the development team before migration begins
-
-### Backfill SQL (After Officer Provides Data)
-
-Once the officer provides street addresses, run:
+**Phase 1a Backfill SQL:**
 
 ```sql
--- Example (replace with actual streets provided by officer):
-UPDATE units SET street = 'Sampaguita' WHERE house_no = '113';
-UPDATE units SET street = 'Sampaguita' WHERE house_no = '115';
-UPDATE units SET street = 'Mahogany' WHERE house_no = '118';
-UPDATE units SET street = 'Mahogany' WHERE house_no = '124';
-UPDATE units SET street = 'Acacia' WHERE house_no = '128';
-UPDATE units SET street = 'Palmera' WHERE house_no = '130';
+-- Step 1: Add street column as nullable
+ALTER TABLE units ADD COLUMN street VARCHAR(100);
 
--- Verify backfill:
+-- Step 2: Backfill with known streets (map test data to valid streets)
+-- Adjust house_no-to-street mapping based on actual HOA layout
+UPDATE units SET street = 'Sampaguita' WHERE house_no IN ('113', '115');
+UPDATE units SET street = 'Sunflower' WHERE house_no IN ('165', '167');
+UPDATE units SET street = 'Wonderland Avenue' WHERE house_no IN ('16A', '13B');
+
+-- Step 3: Verify backfill
 SELECT house_no, street, unit_code FROM units 
-WHERE house_no IN ('113', '115', '118', '124', '128', '130')
-ORDER BY house_no;
--- Expected: All six should have a street value, and unit_code should show "HouseNo Street"
+ORDER BY street, house_no;
+-- Expected: All units should have a street value; unit_code should show "HouseNo Street" format
+
+-- Step 4: Make street NOT NULL
+ALTER TABLE units ALTER COLUMN street SET NOT NULL;
+
+-- Step 5: Update constraints
+ALTER TABLE units DROP CONSTRAINT IF EXISTS units_house_no_key;
+ALTER TABLE units ADD CONSTRAINT units_house_no_street_key UNIQUE (house_no, street);
 ```
+
+**Note:** The house_no-to-street mapping above is illustrative. Use actual HOA property assignments for production.
 
 ---
 
@@ -768,12 +755,14 @@ Before deploying to production:
 ## References
 
 1. **Comprehensive Requirements:** `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4
-2. **House No Audit:** `WONDERLAND_TASK_AUDIT_HOUSE_NO_CONSTRAINT.md`
-3. **Architecture Decisions:** `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21 through DEC-24)
-4. **Decision Log:** `docs/DECISION_LOG.md` DEC-18, DEC-20
-5. **Stage 1 Guide:** `docs/WONDERLAND_STAGE_1_IMPLEMENTATION_GUIDE.md` §11.5 (auth context)
+2. **Architecture Decisions:** `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21 through DEC-24)
+3. **Decision Log:** `docs/DECISION_LOG.md` DEC-18, DEC-20, DEC-21 (streets)
+4. **Stage 1 Implementation Guide:** `docs/WONDERLAND_STAGE_1_IMPLEMENTATION_GUIDE.md` §11.5 (auth context)
 
 ---
 
 **End of Stage 2 Database Migration Plan.**  
 Ready for implementation in Claude Code with the Architecture Decisions document.
+
+**Revision Date:** 2026-08-12  
+**Changes:** Phase 3 SQL corrected to use `homeowners.unit_id` (verified in production); non-existent audit file reference removed; §4 backfill updated to use confirmed 5-street list; pre-migration checklist updated.
