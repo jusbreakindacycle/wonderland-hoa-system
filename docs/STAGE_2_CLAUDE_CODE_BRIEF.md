@@ -1,7 +1,36 @@
 # Wonderland HOA System — Stage 2 Implementation Brief for Claude Code
 **Date:** 2026-08-12  
 **Mode:** Opus 5, Extra High Effort, Plan Mode  
-**Status:** ✅ Ready to Implement
+**Status:** ✅ **IMPLEMENTED** — see the amendment banner below
+
+---
+
+> ## ⚠️ AMENDED after execution — read `DECISION_LOG.md` DEC-22 – DEC-26
+>
+> This brief was correct about `homeowners.unit_id` (its headline correction) and about the
+> five-street list. Five of its other claims were falsified against the live database
+> (`fgsehrblzpheeghplice`, PostgreSQL 17.6) on 12 August 2026:
+>
+> | Claim | Reality |
+> |---|---|
+> | "Verify `officers` table with `role` column exists" (pre-implementation checklist) | **No `officers` table existed.** Roles were on `profiles.role`, ten values, no `super_admin`. The migration creates the table — DEC-23 |
+> | "Regenerate `unit_code` via generated column (**automatic**)" (Phase 1) | Not automatic. A generated column's expression is fixed. Needed `ALTER COLUMN unit_code SET EXPRESSION AS (…)` — DEC-26 item 3 |
+> | "Temporarily disable RLS during backfill" (Phase 6) | Unnecessary and unsafe; the migration runs as the table owner, which already bypasses RLS. Omitted — DEC-26 item 6 |
+> | "Migration 004 SQL file (or `004_occupancy_model.sql`)" (Deliverables) | `004_` sorts **before** `20260807050836_…` and would reorder migration history. Shipped as `20260812061500_stage2_property_and_occupancy_model.sql` — DEC-26 item 9 |
+> | "`DECISION_LOG.md` … DEC-21 (streets exist)" (Authority table) | DEC-21 is the **Android application id**. The street list comes from the phase-1 register, the phase-2 blueprint and the reconciliation review, and is closed by DEC-26 item 2 |
+>
+> Two further departures, both owner decisions of 12 August 2026:
+>
+> - **Test data was deleted, not relabelled.** Units 167, 16A and 13B were removed, cascading to
+>   3 homeowners, 5 dues, 4 payments, 2 unit credits and 3 payment allocations; 117 Wonderland
+>   Avenue and 121 Orchids were created vacant. DEC-26 item 1.
+> - **The integration tests below asking for a "Record Transfer" button are not satisfied.** That is
+>   new product functionality on the legacy web bridge, which DEC-20 forbids. The RPC ships and is
+>   callable; no UI. DEC-26 item 10.
+>
+> Additionally, Phase 3's `is_active = true` filter was dropped so that closed occupancy periods
+> are preserved (DEC-26 item 7), and the shipped schema adds a five-street CHECK constraint and a
+> one-current-owner-per-unit unique index beyond what this brief specifies (DEC-26 items 2 and 4).
 
 ---
 

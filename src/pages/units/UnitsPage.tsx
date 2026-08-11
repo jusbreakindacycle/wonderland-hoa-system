@@ -11,6 +11,7 @@ import { useUnits, useAddUnit, useUnitDetail, type UnitWithHomeowner } from '@/h
 import { useAddHomeowner, useUpdateHomeowner, useMarkMovedOut } from '@/hooks/useHomeowners'
 import { useAuthStore } from '@/stores/authStore'
 import { canManageHomeowners } from '@/lib/auth'
+import { STREETS, type Street } from '@/lib/database.types'
 
 type DetailHomeowner = {
   id: string
@@ -139,10 +140,11 @@ function UnitDetailModal({ unitId, onClose }: { unitId: string; onClose: () => v
 function AddUnitModal({ onClose }: { onClose: () => void }) {
   const addUnit = useAddUnit()
   const [houseNo, setHouseNo] = useState('')
+  const [street, setStreet] = useState<Street>(STREETS[0])
   const [status, setStatus] = useState<'occupied' | 'vacant'>('vacant')
 
   async function handleSubmit() {
-    await addUnit.mutateAsync({ house_no: houseNo.trim(), status })
+    await addUnit.mutateAsync({ house_no: houseNo.trim(), street, status })
     onClose()
   }
 
@@ -162,6 +164,13 @@ function AddUnitModal({ onClose }: { onClose: () => void }) {
           value={houseNo}
           onChange={e => setHouseNo(e.target.value)}
           placeholder="e.g. 12, 12A, 14B"
+        />
+        {/* A select, not free text: units_street_check rejects anything
+            outside the five confirmed streets (Circle is excluded). */}
+        <Select
+          label="Street" value={street}
+          onChange={e => setStreet(e.target.value as Street)}
+          options={STREETS.map(s => ({ value: s, label: s }))}
         />
         <Select
           label="Status" value={status}
@@ -328,6 +337,7 @@ export function UnitsPage() {
 
   const columns: ColumnDef<UnitWithHomeowner, unknown>[] = [
     { accessorKey: 'house_no', header: 'House No.' },
+    { accessorKey: 'street', header: 'Street' },
     {
       id: 'homeowner',
       header: 'Homeowner',
@@ -394,7 +404,7 @@ export function UnitsPage() {
 
       <input
         type="search"
-        placeholder="Search by house no. or homeowner name..."
+        placeholder="Search by house no., street, or homeowner name..."
         value={search}
         onChange={e => setSearch(e.target.value)}
         className="w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"

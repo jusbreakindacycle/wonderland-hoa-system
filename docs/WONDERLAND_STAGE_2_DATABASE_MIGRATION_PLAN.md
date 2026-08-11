@@ -2,8 +2,32 @@
 
 **Date:** 2026-08-12  
 **Target Database:** Supabase PostgreSQL (HOA project)  
-**Authority:** `WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4, `DECISION_LOG.md` DEC-18/DEC-20, `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21 through DEC-24)  
-**Status:** Ready for implementation in Claude Code (Opus 5, Extra High effort, Plan mode)
+**Authority:** `DECISION_LOG.md` **DEC-22 – DEC-26**, then `WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4, `DECISION_LOG.md` DEC-18/DEC-20, `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-22 through DEC-25, as amended)  
+**Status:** ✅ **IMPLEMENTED** by `supabase/migrations/20260812061500_stage2_property_and_occupancy_model.sql` — see the amendment banner below.
+
+---
+
+> ## ⚠️ AMENDED — this plan was written against an assumed schema
+>
+> Seven of this document's assumptions are false against the live database (project
+> `fgsehrblzpheeghplice`, PostgreSQL 17.6), verified 12 August 2026. The migration that shipped
+> corrects each one. **`docs/DECISION_LOG.md` DEC-22 … DEC-26 is the authority**; where this plan
+> and the log disagree, the log wins.
+>
+> | # | This plan says | Reality | Where corrected |
+> |---|---|---|---|
+> | C1 | An `officers` table with `role = 'super_admin'` exists | It did not. Roles were on `profiles.role`, ten values, no `super_admin`. The table is now created by the migration | DEC-23 |
+> | C2 | `occupancies.homeowner_id = auth.uid()` identifies a resident | Different keys. Resolve via `homeowners.profile_id = auth.uid()` | DEC-22 |
+> | C3 | `homeowners.first_name` / `.last_name` | The column is `full_name` | DEC-24 |
+> | C4 | `unit_code` regenerates automatically (Phase 1c) | A generated column's expression is fixed. It needed `ALTER COLUMN unit_code SET EXPRESSION AS (…)` | DEC-26 item 3 |
+> | C5 | These are DEC-21…DEC-24 | DEC-21 was already the Android application id (2026-08-10). Renumbered DEC-22…DEC-25 | DEC-22…DEC-25 |
+> | C6 | Disable RLS during migration (Phase 6) | Unnecessary — the migration runs as `postgres`, the table owner, which already bypasses RLS — and it leaves `units` unprotected meanwhile. Omitted | DEC-26 item 6 |
+> | C7 | `EXTRACT(DAY FROM (date - date))` | `date - date` is already an integer; `EXTRACT` raises on it | DEC-24 |
+>
+> DEC-26 additionally records what the shipped migration adds beyond this plan: the destructive
+> test-data prune, the five-street CHECK constraint, the one-current-owner-per-unit unique index,
+> `>=` rather than `>` on the date check, a backfill that keeps closed occupancy periods, and a
+> transitional `homeowners` → `occupancies` sync trigger.
 
 ---
 
@@ -11,12 +35,12 @@
 
 Before running any SQL, verify:
 
-- [ ] You have a **backup** of the production database (Supabase project)
+- [ ] You have a **backup** of the production database (Supabase project). **This is not optional** — the shipped migration's STEP 0 deletes units 167, 16A and 13B and cascades to their homeowners, dues, payments and credits. A backup restore is the only rollback path.
 - [ ] You have confirmed the **5 authoritative street names** (Sampaguita, Sunflower, Wonderland Avenue, Yellowbell, Orchids — Circle is excluded)
-- [ ] You understand that existing test data (house_no 113, 115, 165, 167, 16A, 13B) will be replaced during Phase 1 backfill
+- [ ] ~~You understand that existing test data (house_no 113, 115, 165, 167, 16A, 13B) will be replaced during Phase 1 backfill~~ → superseded by the owner's mapping of 12 Aug 2026: 113 Sunflower, 115 Yellowbell, 165 Sampaguita; 167/16A/13B **deleted**; 117 Wonderland Avenue and 121 Orchids **created** as vacant (DEC-26 item 1)
 - [ ] All developers have pulled the latest `main` (commit `3c02da9` or later — Stage 2 docs commit)
 - [ ] No other migrations are in flight
-- [ ] `officers` table exists with a `role` column (for super-admin RLS checks in Phase 6)
+- [ ] ~~`officers` table exists with a `role` column (for super-admin RLS checks in Phase 6)~~ `SUPERSEDED` — **this was unmet.** The table did not exist; the migration creates it (C1, DEC-23)
 
 ---
 
@@ -136,9 +160,9 @@ CREATE INDEX idx_units_street
 WHERE house_no = '113' AND street = 'Sampaguita'
 ```
 
-### Phase 6: Update RLS Policies (DEC-21, DEC-22)
+### Phase 6: Update RLS Policies (DEC-22, DEC-23)
 
-**From** `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21, DEC-22):
+**From** `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-22, DEC-23):
 
 See **§3: RLS Policies** below.
 
@@ -173,14 +197,33 @@ ALTER TABLE units ADD CONSTRAINT units_house_no_street_key
   UNIQUE (house_no, street);
 ```
 
-### Phase 1c: Regenerate `unit_code` (Automatic via Generated Column)
+### Phase 1c: Regenerate `unit_code`
+
+> ⚠️ **CORRECTED (C4) — it is NOT automatic.** A generated column's expression is fixed at creation.
+> `unit_code` has been a bare alias of `house_no` since `003_house_no.sql:23-24` and stays that way
+> until explicitly altered. The claim below, and the identical claim in §"Impact" above
+> ("generated column changes automatically"), are both wrong.
 
 ```sql
+-- ❌ AS DRAFTED — nothing happens
 -- The generated column definition updates automatically.
--- Verify it's correct:
-SELECT house_no, street, unit_code FROM units LIMIT 10;
--- Expected: unit_code should now be "113 Sampaguita", "115 Sampaguita", etc.
 ```
+
+```sql
+-- ✅ AS SHIPPED. PostgreSQL 17 (live server is 17.6); rewrites the table.
+-- MUST run AFTER `street` is NOT NULL, or every unit_code concatenates to NULL.
+ALTER TABLE units
+  ALTER COLUMN unit_code SET EXPRESSION AS (house_no || ' ' || street);
+
+-- Verify:
+SELECT house_no, street, unit_code FROM units ORDER BY street, house_no;
+-- Expected: "113 Sunflower", "115 Yellowbell", "117 Wonderland Avenue",
+--           "121 Orchids", "165 Sampaguita"
+```
+
+> On a server older than PG 17, substitute the `003_house_no.sql` pattern: `DROP COLUMN unit_code`,
+> then `ADD COLUMN unit_code text GENERATED ALWAYS AS (house_no || ' ' || street) STORED`. That
+> changes on-disk column order and nothing else.
 
 ### Phase 2: Create `occupancies` Table
 
@@ -286,9 +329,16 @@ CREATE INDEX idx_units_street
 -- No explicit index needed; UNIQUE constraint includes the index.
 ```
 
-### Phase 5: Create PostgreSQL Functions (DEC-21, DEC-23)
+### Phase 5: Create PostgreSQL Functions (DEC-22, DEC-24)
 
-#### Function 1: Get Current Owner of a Unit (DEC-21 — Current Occupancy Query)
+> ⚠️ **CORRECTED — none of the four blocks in this section ship as written.** Common to all four:
+> they select `h.first_name` / `h.last_name`, which do not exist (C3 — the column is `full_name`),
+> and they carry **no authorisation guard**, while being granted to `authenticated`. The shipped
+> versions are all `SECURITY DEFINER` with `SET search_path = public, pg_temp` and open with the
+> `IS NOT TRUE` guard shape that DEC-16 established and DEC-17 preserved. Per-function departures
+> are noted inline below and in `DECISION_LOG.md` DEC-23 and DEC-24.
+
+#### Function 1: Get Current Owner of a Unit (DEC-22 — Current Occupancy Query)
 
 ```sql
 CREATE OR REPLACE FUNCTION get_current_owner(unit_id_param UUID)
@@ -317,7 +367,12 @@ AS $$
 $$;
 ```
 
-#### Function 2: Get All Current Units Owned by a Homeowner (DEC-21 — Multi-Property Query)
+#### Function 2: Get All Current Units Owned by a Homeowner (DEC-22 — Multi-Property Query)
+
+> ⚠️ Additionally: as drafted, this takes an arbitrary `homeowner_id_param` with no check. Granted to
+> `authenticated` and RLS-exempt, it would hand any resident the complete property holdings of any
+> other resident. The shipped version requires the caller to be an officer **or** to own the
+> `homeowners` row (`h.profile_id = auth.uid()`).
 
 ```sql
 CREATE OR REPLACE FUNCTION get_owned_units(homeowner_id_param UUID)
@@ -345,7 +400,11 @@ AS $$
 $$;
 ```
 
-#### Function 3: Occupancy History (DEC-23 — Audit Trail Query)
+#### Function 3: Occupancy History (DEC-24 — Audit Trail Query)
+
+> ⚠️ Additionally: `EXTRACT(DAY FROM (occ.move_out_date - occ.move_in_date))` **raises** (C7).
+> `date - date` is already an integer day count and `EXTRACT` rejects an integer. Shipped form:
+> `(COALESCE(o.move_out_date, CURRENT_DATE) - o.move_in_date)::int`.
 
 ```sql
 CREATE OR REPLACE FUNCTION occupancy_history(
@@ -388,7 +447,23 @@ AS $$
 $$;
 ```
 
-#### Function 4: Record Occupancy Transfer (DEC-22 — Super-Admin Only)
+#### Function 4: Record Occupancy Transfer (DEC-23 — Super-Admin Only)
+
+> ⚠️ **Four departures in the shipped version**, each necessary (DEC-23):
+> 1. **No `officer_id_param`.** In a `SECURITY DEFINER` function a caller-supplied actor is
+>    spoofable — any permitted caller could attribute a transfer to a colleague. The actor comes
+>    from `auth.uid()`.
+> 2. **It does not raise when the unit has no current occupancy.** Units 117 and 121 ship vacant;
+>    the version below (`IF old_occ_id IS NULL THEN RAISE`) could never record their first owner.
+> 3. **It writes an `audit_logs` row** (`action = 'occupancy.transferred'`). DEC-09 makes BUS-026 a
+>    non-negotiable invariant and an ownership transfer is the most audit-critical write in the
+>    system; the version below records nothing.
+> 4. **It returns `jsonb`**, matching `generate_monthly_dues`, and sets `units.status = 'occupied'`.
+>
+> The comment `-- Function runs with superuser privs (controlled via RLS policy)` below is also
+> misleading: `SECURITY DEFINER` **bypasses** RLS. The guard inside the function *is* the access
+> control — this is exactly the failure mode DEC-16 finding F5 recorded against
+> `preview_payment_allocation`.
 
 ```sql
 CREATE OR REPLACE FUNCTION record_occupancy_transfer(
@@ -441,20 +516,36 @@ $$;
 
 ---
 
-## Phase 6: RLS Policies (DEC-21, DEC-22)
+## Phase 6: RLS Policies (DEC-22, DEC-23)
 
-### Disable Default RLS Temporarily (for migration)
+### ~~Disable Default RLS Temporarily (for migration)~~ — ⚠️ NOT DONE (C6)
+
+> This step is **omitted from the shipped migration**. It buys nothing and costs safety: the
+> migration runs as `postgres`, which owns every table involved and therefore already bypasses RLS
+> (no table carries `FORCE ROW LEVEL SECURITY`). Executing it would leave `units` unprotected for
+> the duration of the migration for no benefit. See `DECISION_LOG.md` DEC-26 item 6.
 
 ```sql
-ALTER TABLE units DISABLE ROW LEVEL SECURITY;
-ALTER TABLE occupancies DISABLE ROW LEVEL SECURITY;
+-- ❌ NOT RUN — retained for traceability
+-- ALTER TABLE units DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE occupancies DISABLE ROW LEVEL SECURITY;
 ```
 
 ### Enable and Create Policies
 
 #### Units Table: Residents Can View Their Current Units
 
+> ⚠️ **CORRECTED.** Three problems with the block below.
+> (a) `occupancies.homeowner_id = auth.uid()` compares different keys and matches nothing (C2).
+> (b) It **adds** a policy next to the existing `units: resident read own`. Permissive policies are
+> OR-ed, so this would have *widened* resident access, not narrowed it to current occupancy. The
+> shipped migration **drops and recreates** the existing policy under the same name.
+> (c) `officers_view_all_units` is redundant — `units: finance/admin read` already grants `SELECT`
+> on `units` to all nine officer roles — and is **not** created.
+> See `DECISION_LOG.md` DEC-22.
+
 ```sql
+-- ❌ AS DRAFTED — retained for traceability
 ALTER TABLE units ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "residents_view_owned_units"
@@ -483,6 +574,14 @@ CREATE POLICY "officers_view_all_units"
 ```
 
 #### Occupancies Table: Officers Can View, Super-Admin Can Write
+
+> ⚠️ **CORRECTED.** The `officers` table read by every policy below **did not exist** (C1); the
+> migration now creates it, keyed on `profiles.id` so `officers.id = auth.uid()` is correct as
+> written. The shipped policies use the `"table: audience action"` naming of
+> `001_initial_schema.sql` and call the `is_officer()` / `is_super_admin()` helpers rather than
+> repeating the subquery. A `"occupancies: resident read own"` policy is also added — a resident
+> may read their own occupancy rows, including closed ones, which are their own tenure history.
+> See `DECISION_LOG.md` DEC-23.
 
 ```sql
 ALTER TABLE occupancies ENABLE ROW LEVEL SECURITY;
@@ -565,15 +664,27 @@ Current test data in the `units` table (house_no: 113, 115, 165, 167, 16A, 13B) 
 
 **Phase 1a Backfill SQL:**
 
-```sql
--- Step 1: Add street column as nullable
-ALTER TABLE units ADD COLUMN street VARCHAR(100);
+> ⚠️ **SUPERSEDED by the owner's mapping of 12 August 2026** (DEC-26 item 1). The mapping below was
+> explicitly illustrative. What shipped: 113 → Sunflower, 115 → Yellowbell, 165 → Sampaguita; units
+> **167, 16A and 13B were deleted** (cascading to 3 homeowners, 5 dues, 4 payments, 2 unit credits
+> and 3 payment allocations, and requiring an explicit prior delete of `credit_transactions`, whose
+> foreign keys are `NO ACTION`); **117 Wonderland Avenue** and **121 Orchids** were created as
+> vacant. Column type is `text`, matching every other text column in this schema, not `VARCHAR(100)`.
+> A `units_street_check` constraint now restricts `street` to the five confirmed values.
 
--- Step 2: Backfill with known streets (map test data to valid streets)
--- Adjust house_no-to-street mapping based on actual HOA layout
-UPDATE units SET street = 'Sampaguita' WHERE house_no IN ('113', '115');
-UPDATE units SET street = 'Sunflower' WHERE house_no IN ('165', '167');
-UPDATE units SET street = 'Wonderland Avenue' WHERE house_no IN ('16A', '13B');
+```sql
+-- ❌ AS DRAFTED (illustrative) — retained for traceability
+-- ALTER TABLE units ADD COLUMN street VARCHAR(100);
+-- UPDATE units SET street = 'Sampaguita' WHERE house_no IN ('113', '115');
+-- UPDATE units SET street = 'Sunflower' WHERE house_no IN ('165', '167');
+-- UPDATE units SET street = 'Wonderland Avenue' WHERE house_no IN ('16A', '13B');
+
+-- ✅ AS SHIPPED
+ALTER TABLE units ADD COLUMN IF NOT EXISTS street text;
+
+UPDATE units SET street = 'Sunflower'  WHERE house_no = '113';
+UPDATE units SET street = 'Sampaguita' WHERE house_no = '165';
+UPDATE units SET street = 'Yellowbell' WHERE house_no = '115';
 
 -- Step 3: Verify backfill
 SELECT house_no, street, unit_code FROM units 
@@ -589,6 +700,16 @@ ALTER TABLE units ADD CONSTRAINT units_house_no_street_key UNIQUE (house_no, str
 ```
 
 **Note:** The house_no-to-street mapping above is illustrative. Use actual HOA property assignments for production.
+
+**Update, 12 Aug 2026:** the owner supplied the actual assignment; see the banner on the block above and `DECISION_LOG.md` DEC-26 item 1. The shipped migration also adds the enforcing constraint:
+
+```sql
+ALTER TABLE units
+  ADD CONSTRAINT units_street_check
+  CHECK (street IN ('Sampaguita','Sunflower','Wonderland Avenue','Yellowbell','Orchids'));
+```
+
+This makes the phase-2 blueprint's "`Circle` is excluded and must not be selectable as an official property street" enforceable in the database rather than only in the UI, and closes Requirements §4.2's `OPEN` street list at five.
 
 ---
 
@@ -615,7 +736,22 @@ INSERT INTO units (house_no, street) VALUES ('113', 'Sampaguita');
 -- Expected: Second insert fails with UNIQUE constraint violation ✓
 
 INSERT INTO units (house_no, street) VALUES ('113', 'Mahogany');
+-- ❌ WRONG. `Mahogany` is not one of the five confirmed streets and now
+--    violates units_street_check. Use a real street instead:
+INSERT INTO units (house_no, street) VALUES ('113', 'Orchids');
 -- Expected: Insert succeeds (different street) ✓
+INSERT INTO units (house_no, street) VALUES ('113', 'Circle');
+-- Expected: violates units_street_check ✓  (DEC-26 item 2)
+
+-- Test 5: One current owner per unit (DEC-26 item 4)
+INSERT INTO occupancies (homeowner_id, unit_id, move_in_date)
+VALUES ('<other-homeowner>', '<unit-113-id>', CURRENT_DATE);
+-- Expected: violates idx_occupancies_one_current_owner_per_unit ✓
+
+-- Test 6: Append-only
+DELETE FROM occupancies WHERE id = '<any>';
+-- Expected: 0 rows affected — no permissive DELETE policy, plus a
+--           RESTRICTIVE "occupancies: no delete" policy ✓
 ```
 
 ### Integration Tests (Application Layer)
@@ -643,6 +779,14 @@ INSERT INTO units (house_no, street) VALUES ('113', 'Mahogany');
 4. Maria's old unit (sold): NOT visible
 5. Maria's new unit (after purchase in Stage 3): visible once occupancy row is created
 ```
+
+> ⚠️ Scenario 1 above describes an officer web-app transfer flow. **That UI is not built in
+> Stage 2** — it is new product functionality on the legacy web bridge, which DEC-20 forbids
+> (owner decision, 12 Aug 2026; `DECISION_LOG.md` DEC-26 item 10). Test the RPC directly instead,
+> and note that the shipped signature has **no** `officer_id` argument:
+> `record_occupancy_transfer(p_unit_id, p_new_homeowner_id, p_move_in_date DEFAULT CURRENT_DATE)`.
+> Test it against a **vacant** unit (117 or 121) as well, which the drafted version could not
+> handle, and confirm an `occupancy.transferred` row lands in `audit_logs`.
 
 **Test Scenario 3: RLS Policy — Super-Admin Can Update Occupancy**
 
@@ -691,7 +835,12 @@ If the migration fails or causes data corruption:
 # (Done via Supabase console: Project Settings → Backups → Restore)
 ```
 
-### Option 2: Manual Rollback (If Backup Unavailable)
+### ~~Option 2: Manual Rollback (If Backup Unavailable)~~ — ⚠️ NOT A VALID PATH
+
+> The shipped migration's STEP 0 **deletes** units 167, 16A and 13B and cascades to their
+> homeowners, dues, payments, credits and payment allocations. No sequence of DDL below can bring
+> those rows back. **A backup restore is the only rollback.** The block is retained only because it
+> documents how to reverse the schema half of the change. See `DECISION_LOG.md` DEC-26 item 1.
 
 ```sql
 -- Step 1: Drop new structures
@@ -739,8 +888,8 @@ Assuming Claude Code (Opus 5, Extra High) is used:
 
 Before deploying to production:
 
-- [ ] Backup created (Supabase project backup taken)
-- [ ] Officer has provided street addresses for six missing units
+- [ ] Backup created (Supabase project backup taken) — **mandatory**, see the Rollback section
+- [x] ~~Officer has provided street addresses for six missing units~~ → owner supplied the mapping 12 Aug 2026 (DEC-26 item 1)
 - [ ] All SQL reviewed by second developer (if available)
 - [ ] Test environment (second Supabase project) has passed all tests
 - [ ] Mobile app tested (boots, authenticates, no regression)
@@ -755,14 +904,15 @@ Before deploying to production:
 ## References
 
 1. **Comprehensive Requirements:** `docs/WONDERLAND_COMPREHENSIVE_REQUIREMENTS.md` §2–4
-2. **Architecture Decisions:** `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-21 through DEC-24)
-3. **Decision Log:** `docs/DECISION_LOG.md` DEC-18, DEC-20, DEC-21 (streets)
+2. **Architecture Decisions:** `WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` (DEC-22 through DEC-25, as amended)
+3. **Decision Log:** `docs/DECISION_LOG.md` DEC-18 (handles), DEC-20 (no self-registration, web-bridge scope), **DEC-22 – DEC-26 (the authority for everything in this plan)**. Note: DEC-21 is the Android application id, **not** a streets decision — the street list comes from `docs/phase-1/…CONTROLS_REGISTER_v1.0.md:35-40`, `docs/phase-2/…BLUEPRINT_v1.0.md:240-246` and `docs/reconciliation/…STACK_REVIEW.md:76`, and is closed by DEC-26 item 2.
 4. **Stage 1 Implementation Guide:** `docs/WONDERLAND_STAGE_1_IMPLEMENTATION_GUIDE.md` §11.5 (auth context)
+5. **The migration itself:** `supabase/migrations/20260812061500_stage2_property_and_occupancy_model.sql`
 
 ---
 
-**End of Stage 2 Database Migration Plan.**  
-Ready for implementation in Claude Code with the Architecture Decisions document.
+**End of Stage 2 Database Migration Plan.**
 
-**Revision Date:** 2026-08-12  
-**Changes:** Phase 3 SQL corrected to use `homeowners.unit_id` (verified in production); non-existent audit file reference removed; §4 backfill updated to use confirmed 5-street list; pre-migration checklist updated.
+**Revision Date:** 2026-08-12 (second revision)  
+**Changes, first revision:** Phase 3 SQL corrected to use `homeowners.unit_id` (verified in production); non-existent audit file reference removed; §4 backfill updated to use confirmed 5-street list; pre-migration checklist updated.  
+**Changes, second revision:** amendment banner added recording seven assumptions falsified against the live database (C1–C7); DEC-21…DEC-24 renumbered DEC-22…DEC-25; inline `⚠️ CORRECTED` notes added to Phase 1c, Phase 5 (all four functions), Phase 6 (both policy sets and the RLS-disable step), §4 backfill, §5 tests and §6 rollback. `docs/DECISION_LOG.md` DEC-22 – DEC-26 is now the authority; this plan is a historical record of the design, not of what shipped.

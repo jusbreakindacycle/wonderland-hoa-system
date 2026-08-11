@@ -104,7 +104,7 @@ export function printDelinquencyReport(rows: DelinquencyRow[]) {
   <table style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead>
       <tr style="background:#0f2952;">
-        ${['#','House No.','Homeowner','Month','Balance','Due Date','Days Over','Status']
+        ${['#','Unit','Homeowner','Month','Balance','Due Date','Days Over','Status']
           .map(h => `<th style="padding:10px 12px;font-size:10px;font-weight:700;color:#93c5fd;text-align:left;text-transform:uppercase;letter-spacing:1px;border:none;">${h}</th>`)
           .join('')}
       </tr>
@@ -161,7 +161,7 @@ export function printPaymentReceipt(payment: ReceiptPayment) {
   })
 
   const detailRows = [
-    ['House No.',       payment.units?.unit_code ?? '—'],
+    ['Unit',            payment.units?.unit_code ?? '—'],
     ['Homeowner',       owner],
     ['Payment Method',  methodLabel],
     ...(payment.reference_number ? [['Reference No.',  payment.reference_number]] : []),

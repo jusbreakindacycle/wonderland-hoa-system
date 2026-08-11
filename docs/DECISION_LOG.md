@@ -39,6 +39,11 @@ the task that created this file.
 | [DEC-19](#dec-19) | 2026-08-09 | Measured brand colour values authorised as canonical; supersedes Requirements §6.4's estimated value | Stage 1 |
 | [DEC-20](#dec-20) | 2026-08-09 | Transitional legacy web operations bridge (S1-D4); no resident self-registration | Stage 1 |
 | [DEC-21](#dec-21) | 2026-08-10 | Android application id `ph.wonderlandtownhomes.hoa` (S1-D2) | Stage 1 |
+| [DEC-22](#dec-22) | 2026-08-12 | RLS for multi-property ownership, resolved through `homeowners.profile_id` | Stage 2 |
+| [DEC-23](#dec-23) | 2026-08-12 | `officers` table created; occupancy transfers are super-admin-only | Stage 2 |
+| [DEC-24](#dec-24) | 2026-08-12 | Occupancy audit trail exposed as an officers-only RPC, no UI | Stage 2 |
+| [DEC-25](#dec-25) | 2026-08-12 | Handle reassignment after transfer is Stage 3 onboarding policy | Stage 2 |
+| [DEC-26](#dec-26) | 2026-08-12 | Stage 2 migration deltas, corrections, and destructive test-data prune | Stage 2 |
 
 ---
 
@@ -434,3 +439,321 @@ the task that created this file.
     [DEC-11](#dec-11).
 
 - **Supersedes:** None. S1-D2 was open, not previously answered.
+
+---
+
+> **Numbering note for DEC-22 … DEC-25.** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md`
+> was drafted numbering these four decisions DEC-21 through DEC-24. DEC-21 was already taken by
+> the Android application id above, recorded 10 August 2026 — two days earlier. The four Stage 2
+> decisions are therefore renumbered **DEC-22 … DEC-25** here and in that document. No decision
+> content changed in the renumbering; the substantive amendments are recorded per-entry below and
+> collected in [DEC-26](#dec-26).
+
+## DEC-22
+
+- **Date:** 2026-08-12
+- **Decision:** After the occupancy model exists, a resident may currently own more than one unit.
+  RLS must let them see every unit they currently hold — one `occupancies` row per held unit, with
+  `move_out_date IS NULL`. The mobile multi-property switching UI remains Stage 3; the data model
+  and the policies are Stage 2.
+
+  **Amendment to the drafted decision (this is the substantive change):** the drafted policy read
+
+  ```sql
+  AND occupancies.homeowner_id = auth.uid()
+  ```
+
+  which can never match. `occupancies.homeowner_id` references `homeowners.id`; `auth.uid()` is a
+  `profiles.id`. They are different keys over different tables. Resident identity resolves through
+  `homeowners.profile_id = auth.uid()` — the form all six pre-existing resident policies in
+  `001_initial_schema.sql` already use. The shipped policy is:
+
+  ```sql
+  DROP POLICY IF EXISTS "units: resident read own" ON units;
+
+  CREATE POLICY "units: resident read own"
+    ON units FOR SELECT
+    USING (
+      id IN (
+        SELECT o.unit_id
+          FROM occupancies o
+          JOIN homeowners  h ON h.id = o.homeowner_id
+         WHERE h.profile_id = auth.uid()
+           AND o.move_out_date IS NULL
+      )
+    );
+  ```
+
+- **Context / citation:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-21 as drafted;
+  Requirements §4.3 (multi-unit owner: "One account listing all owned units"); RA 9904, which does
+  not prohibit one member owning several units.
+
+- **Effect:**
+  - The existing `units: resident read own` policy is **replaced, not supplemented**. Permissive
+    policies are OR-ed: creating the drafted `residents_view_owned_units` alongside the existing
+    policy would have *widened* resident access — a unit would have been visible through either the
+    old `homeowners` path or the new `occupancies` path. The policy name is retained so the naming
+    scheme of `001_initial_schema.sql` stays intact.
+  - The drafted `officers_view_all_units` policy is **not** created. `units: finance/admin read`
+    already grants `SELECT` on `units` to all nine officer roles; a second permissive policy would
+    be dead weight.
+  - `get_owned_units(p_homeowner_id)` is callable by an officer for anyone, or by a resident for
+    their own homeowner record only. Without that second clause the function — being
+    `SECURITY DEFINER`, and therefore RLS-exempt — would have handed any authenticated resident the
+    complete property holdings of any other resident.
+
+- **What was explicitly NOT decided:** the resident policies on `dues`, `payments`,
+  `payment_allocations`, `unit_credits` and `credit_transactions` still resolve through
+  `homeowners.is_active`, not through `occupancies`. Unit visibility is now occupancy-backed while
+  financial visibility is not. Aligning them is [DEC-07](#dec-07)'s dated property-relationship
+  model, which needs the `relationship` column Requirements §4.3 specifies and `occupancies` does
+  not carry. Stage 3.
+
+- **Supersedes:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-21 as drafted, in both
+  its number and its `homeowner_id = auth.uid()` predicate.
+
+## DEC-23
+
+- **Date:** 2026-08-12
+- **Decision:** Only a super-admin officer may record an occupancy transfer. Other officers may read
+  occupancy but not modify it. Enforced at the RLS layer and inside the transfer RPC. Expansion to
+  other officer roles is deferred to Stage 4.
+
+  **Amendment to the drafted decision:** the drafted SQL assumed an `officers` table with a
+  `role = 'super_admin'` column. **No such table existed** — in the repository, in any migration, or
+  in the live database. Roles live on `profiles.role`, CHECK-constrained to ten values, none of them
+  `super_admin`. The owner's decision, 12 August 2026, was to **build the table** rather than map
+  "super-admin" onto the existing `profiles.role = 'admin'`:
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS officers (
+    id              uuid        PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    role            text        NOT NULL CHECK (role IN ('super_admin', 'officer')),
+    position_label  text,
+    is_active       boolean     NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now()
+  );
+  ```
+
+  The primary key **is** `profiles.id`, which **is** `auth.users.id`. That is deliberate: it makes
+  the drafted predicate `officers.id = auth.uid()` correct without translation, and it makes an
+  officer row impossible to create for a person who has no profile.
+
+- **Context / citation:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-22 as drafted, and
+  its pre-migration checklist item "`officers` table exists with a `role` column", which was
+  **unmet**. Verified against project `fgsehrblzpheeghplice` on 12 August 2026.
+
+- **Effect:**
+  - Seeded from the role model that exists today: every profile whose `role` is not `resident`
+    becomes an officer, and `admin` — which Requirements §3.3 describes as the permanent superuser —
+    becomes `super_admin`. Against live data this produced exactly one row.
+  - Two helpers, `is_officer()` and `is_super_admin()`, mirror `has_any_role()` at
+    `001_initial_schema.sql:183-192`: `SECURITY DEFINER`, `search_path` pinned to `public, pg_temp`,
+    `EXECUTE` revoked from `PUBLIC` and `anon`, granted to `authenticated`. Both are
+    `SELECT EXISTS (...)` and so return `true`/`false` and never `NULL`. Guards nonetheless use the
+    `IS NOT TRUE` form from [DEC-16](#dec-16), so that no later edit can reintroduce the fail-open.
+  - `anon` **is** revoked on these two, unlike `get_my_role`/`has_any_role`. Every policy this
+    migration creates carries an explicit `TO authenticated`, so no anonymous session ever evaluates
+    one of these helpers and the revocation cannot turn an anonymous read into a hard permission
+    error. This is the condition DEC-16 could not satisfy for the older helpers and is why it
+    knowingly left two advisor findings open; new policies do not repeat that.
+  - `record_occupancy_transfer` departs from the drafted version in four ways, each necessary:
+    1. **No `officer_id` parameter.** The drafted signature took the acting officer as an argument.
+       In a `SECURITY DEFINER` function that is spoofable — any permitted caller could attribute a
+       transfer to a colleague. The actor is taken from `auth.uid()`.
+    2. **It no longer raises when the unit has no current occupancy.** Units 117 and 121 ship vacant;
+       the drafted version could never have recorded their first owner.
+    3. **It writes an `audit_logs` row** (`action = 'occupancy.transferred'`). [DEC-09](#dec-09)
+       makes BUS-026 — every material financial action carries a complete audit event — a
+       non-negotiable invariant, and an ownership transfer is the most audit-critical write in the
+       system. The drafted version recorded nothing.
+    4. **It returns `jsonb`**, matching `generate_monthly_dues`, and sets `units.status = 'occupied'`.
+
+- **What was explicitly NOT decided:**
+  - `officers` is a **second** authorisation source alongside `profiles.role`. The 42 policies from
+    `001_initial_schema.sql` are **not** migrated onto it and continue to use `has_any_role()`.
+    Reconciling the two models is its own task; doing it inside a migration whose subject is the
+    property model would have rewritten the entire security surface.
+  - Requirements §4.4's time-bounded officer terms — a person holds a position for a term, not
+    permanently — are not implemented. `officers` carries `is_active`, not a term range.
+  - No officer-facing transfer UI is built; see [DEC-26](#dec-26).
+
+- **Supersedes:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-22 as drafted, in its
+  number and in the assumption that an `officers` table already existed.
+
+## DEC-24
+
+- **Date:** 2026-08-12
+- **Decision:** Historical occupancy queries are exposed only as a PostgreSQL RPC callable by
+  officers. No UI screen is built in Stage 2. A Reports or Audit screen remains a Stage 4 question.
+
+  **Amendment to the drafted decision:** the drafted function was wrong in three ways and would not
+  have run.
+
+  1. It selected `CONCAT(h.first_name, ' ', h.last_name)`. `homeowners` has neither column; the
+     column is `full_name`.
+  2. It computed duration as `EXTRACT(DAY FROM (occ.move_out_date - occ.move_in_date))`. In
+     PostgreSQL `date - date` yields an **integer** count of days, and `EXTRACT` rejects an integer
+     argument. The shipped form is
+     `(COALESCE(o.move_out_date, CURRENT_DATE) - o.move_in_date)::int`.
+  3. It was `LANGUAGE SQL STABLE` with the officer restriction left as a trailing comment
+     ("Add RLS check inside function to ensure only officers call it"). The shipped function carries
+     an actual guard — `IF is_officer() IS NOT TRUE THEN RAISE EXCEPTION` — as its first statement.
+
+- **Context / citation:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-23 as drafted;
+  Requirements §3.5 (append-only occupancy) and the officer need to reconcile "who paid in 2021"
+  against "who owned in 2021".
+
+- **Effect:** `occupancy_history(p_unit_id, p_from_date, p_to_date)` exists, is granted to
+  `authenticated`, and raises for any caller who is not an active officer. `get_current_owner` is
+  guarded identically. No UI, no button, no screen — officers reach it through the RPC.
+
+- **Supersedes:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-23 as drafted, in its
+  number and in the three defects above.
+
+## DEC-25
+
+- **Date:** 2026-08-12
+- **Decision:** Unchanged from the drafted DEC-24, and renumbered only. After an ownership transfer,
+  the new owner's login handle is generated by the [DEC-18](#dec-18) rule from their new property and
+  applied at account-creation time in Stage 3. Handles are not reassigned retroactively. **No schema
+  change and no code change in Stage 2**; this is policy recorded for Stage 3 onboarding.
+
+- **Context / citation:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-24 as drafted.
+
+- **Effect:** None in Stage 2. Recorded so Stage 3 does not re-derive it.
+
+- **Still open after this entry:** DEC-18's two forward constraints remain unresolved and are **not**
+  closed by this entry — the vacated-handle reassignment cooldown, and the tenant handle convention.
+  A transfer recorded by `record_occupancy_transfer` today does nothing to any handle.
+
+- **Supersedes:** `docs/WONDERLAND_STAGE_2_ARCHITECTURE_DECISIONS.md` DEC-24 as drafted, in its
+  number only.
+
+## DEC-26
+
+- **Date:** 2026-08-12
+- **Decision:** The Stage 2 implementation deltas, recorded together so that no part of
+  `supabase/migrations/20260812061500_stage2_property_and_occupancy_model.sql` is unexplained.
+
+  **1. Test-data prune — destructive, owner-directed.** Units `167`, `16A` and `13B` were deleted
+  rather than assigned a street; `117 Wonderland Avenue` and `121 Orchids` were created as vacant.
+  The surviving five units give each confirmed street exactly one unit:
+
+  | house_no | street |
+  |---|---|
+  | 113 | Sunflower |
+  | 115 | Yellowbell |
+  | 117 | Wonderland Avenue |
+  | 121 | Orchids |
+  | 165 | Sampaguita |
+
+  This was raised as destructive before it was chosen. Cascading from `units` removed 3 homeowners,
+  5 dues, 4 payments, 2 unit credits and 3 payment allocations — **including the 13B Juan Dela Cruz
+  record (2026-01-01 → 2026-05-21)**, which is the historical half of the very
+  duplicate-homeowner bug this table was built to fix. `occupancies` therefore backfilled to two
+  open rows and no closed ones. The closed-row branch of the backfill is still correct and is
+  exercised by any environment whose data was not pruned. `credit_transactions` had to be deleted
+  first and explicitly: both of its foreign keys are `NO ACTION`, not `CASCADE`, and would otherwise
+  have aborted the delete. **The rollback path for this migration is a backup restore**, not the
+  manual DDL reversal sketched in the migration plan §6.
+
+  **2. `units_street_check`.** `street` is constrained to the five confirmed streets. The phase-2
+  blueprint states that "`Circle` is excluded and must not be selectable as an official property
+  street"; a CHECK makes that enforceable in the database rather than only in the UI. Adding a sixth
+  street later is a one-line migration, which is the tracked audit trail this repository wants.
+  Requirements §4.2 still marks the street list `OPEN`; this entry closes it at five.
+
+  **3. `unit_code` had to be re-expressed.** Both Stage 2 documents assert that the generated column
+  "updates automatically" once `street` exists. It does not — a generated column's expression is
+  fixed, and `unit_code` has been a bare alias of `house_no` since `003_house_no.sql:23-24`. The
+  migration issues `ALTER TABLE units ALTER COLUMN unit_code SET EXPRESSION AS
+  (house_no || ' ' || street)`, a PostgreSQL 17 statement (the live server is 17.6), after `street`
+  is `NOT NULL`. Running it before would have made every `unit_code` NULL.
+
+  **4. One current owner per unit.** A partial unique index,
+  `idx_occupancies_one_current_owner_per_unit ON occupancies(unit_id) WHERE move_out_date IS NULL`,
+  is added beyond the drafted schema. Without it the new table can still represent two simultaneous
+  current owners of one unit — the 13B bug merely relocated. With it, the bug is unrepresentable.
+  It forbids modelled co-ownership; `homeowners` has no co-owner concept today and Requirements §4.3
+  specifies "One unit account per unit, regardless of how many adults live there", so nothing the
+  system can currently express is lost. The plan's `idx_occupancies_unit_current` is consequently
+  **not** created — this index already covers exactly that predicate.
+
+  **5. The date CHECK is `>=`, not `>`.** A same-day handover is legitimate and is precisely what
+  `record_occupancy_transfer` produces: it closes the outgoing occupancy on the incoming owner's
+  move-in date. The drafted `>` would have rejected every same-day transfer.
+
+  **6. RLS is never disabled.** The migration plan's Phase 6 opens with
+  `ALTER TABLE units DISABLE ROW LEVEL SECURITY`. That step is omitted. The migration runs as
+  `postgres`, which owns every table involved and therefore already bypasses RLS — no table carries
+  `FORCE ROW LEVEL SECURITY`. Disabling would have bought nothing and left `units` unprotected for
+  the duration.
+
+  **7. Backfill includes closed occupancy periods.** The drafted Phase 3 filtered on
+  `is_active = true`. That filter is dropped: a closed ownership period is exactly what an
+  append-only audit trail exists to hold, and discarding it would leave `occupancy_history()` blind
+  to every tenure that ended before the migration ran.
+
+  **8. A transitional `homeowners` → `occupancies` sync trigger.**
+  `src/hooks/useHomeowners.ts:16-21` is the officer web bridge's de-facto transfer path — two
+  unbatched, non-transactional writes that deactivate the incumbent homeowner and insert the
+  replacement. [DEC-20](#dec-20) forbids adding new product functionality to that bridge, so it is
+  not rewritten in Stage 2. Without a trigger, the first homeowner an officer assigns after this
+  migration would land in `homeowners` and never reach `occupancies`; unit visibility is now
+  occupancy-backed, so that resident would see nothing, and Stage 3 would inherit two disagreeing
+  records of who owns what.
+
+  **This trigger is recorded as an accepted, time-boxed exception to DEC-23.** Being
+  `SECURITY DEFINER`, it writes `occupancies` outside the super-admin gate. The justification is
+  that it creates no new write path: it mirrors a `homeowners` write that the pre-existing
+  `homeowners: admin/secretary write` policy already authorises and that already changes ownership
+  today. **It MUST be dropped when Stage 3 moves resident enrolment onto
+  `record_occupancy_transfer`.**
+
+  **9. Migration file naming.** The brief proposed `004_occupancy_model.sql`. A `004_` name sorts
+  *before* `20260807050836_…` and would have silently reordered migration history. The file uses the
+  Supabase CLI `<timestamp>_name.sql` convention established by [DEC-16](#dec-16).
+
+  **10. Application scope.** Owner decision, 12 August 2026: Stage 2 ships the migration, the
+  hand-maintained `src/lib/database.types.ts`, and the minimum web-bridge changes needed to keep the
+  bridge working — a required `street` `<Select>` on the Add Unit form (without which every insert
+  now fails the `NOT NULL`), a `Street` table column, and relabelling the two `printPDF.ts` cells
+  that print `unit_code` under a `House No.` heading. **No Record Transfer UI**, per DEC-20 and
+  matching DEC-24's own "RPC exists, no UI in Stage 2" precedent. Nothing under `mobile/` changes —
+  the Expo app reads only `profiles`.
+
+- **Context / citation:** `docs/STAGE_2_CLAUDE_CODE_BRIEF.md`; both Stage 2 documents; live schema
+  of project `fgsehrblzpheeghplice` (PostgreSQL 17.6) verified 12 August 2026; owner decisions of
+  the same date.
+
+- **What was explicitly NOT decided:**
+  - `occupancies` carries **no `relationship` column**. Requirements §4.3 asks for
+    owner / tenant / family_member on a `unit_occupancies` relation, and [DEC-07](#dec-07) depends
+    on it. The Stage 2 documents specify an ownership-only model and that is what is built. Adding
+    the column later is additive — nullable, defaulted `'owner'`.
+  - Whether vacant units should accrue dues. Units 117 and 121 ship vacant and
+    `generate_monthly_dues` bills all units including vacant ones
+    (`002_billing_engine.sql:322-334`). Requirements §5.1 leaves this open; [DEC-17](#dec-17)
+    carried it over unchanged and so does this entry.
+  - `src/pages/dues/DuesPage.tsx:114` reads `units.homeowners[0].full_name` with no `is_active`
+    filter and can print a former owner's name. Pre-existing, not introduced here, not fixed here —
+    it is one of eight call sites that should move onto `get_current_owner` in Stage 3.
+
+- **Supersedes:**
+  - Requirements §4.2's `OPEN` status on the street list, per item 2.
+  - Requirements §3.4's statement that no `street` column exists anywhere in the repository, and
+    §3.5's statement that the schema cannot express a time-bounded occupancy. Both were accurate
+    when written and are closed by this migration.
+  - The pre-migration checklist item "`officers` table exists with a `role` column" in
+    `docs/WONDERLAND_STAGE_2_DATABASE_MIGRATION_PLAN.md`, which was unmet; see
+    [DEC-23](#dec-23).
+
+- **Still open after this entry:**
+  - The migration is authored **UNAPPLIED**, exactly as in [DEC-16](#dec-16) and
+    [DEC-17](#dec-17): the authoring session had read-only database access. Status is
+    `IMPLEMENTED_UNVERIFIED` until the owner takes a backup, runs `supabase db push`, and
+    independently re-verifies.
+  - `auth_leaked_password_protection` is still **disabled**, and
+    `supabase/functions/generate-monthly-dues/index.ts` is still an unauthenticated
+    internet-reachable endpoint. Both carried over unchanged.

@@ -21,6 +21,29 @@ export type CreditTransactionType =
   | 'refund_approved'
 export type AnnouncementTarget = 'all' | 'block' | 'unit'
 
+/**
+ * Officer authorisation for the occupancy model (DEC-23). Distinct from
+ * `Role`, which governs every other policy in the schema.
+ */
+export type OfficerRole = 'super_admin' | 'officer'
+
+/**
+ * The five confirmed Wonderland streets. `Circle` is excluded and is
+ * rejected by the `units_street_check` constraint, so it must never be
+ * offered as an option.
+ */
+export const STREETS = [
+  'Sampaguita',
+  'Sunflower',
+  'Wonderland Avenue',
+  'Yellowbell',
+  'Orchids',
+] as const
+
+export type Street = (typeof STREETS)[number]
+
+export type OccupancyStatus = 'CURRENT' | 'HISTORICAL'
+
 export type AllocationPreview = {
   unit_id: string
   payment_amount: number
@@ -69,6 +92,8 @@ export interface Database {
         Row: {
           id: string
           house_no: string
+          street: Street
+          /** Generated: `"<house_no> <street>"`, e.g. `"113 Sunflower"`. */
           unit_code: string
           status: UnitStatus
           created_at: string
@@ -76,14 +101,96 @@ export interface Database {
         Insert: {
           id?: string
           house_no: string
+          /** NOT NULL and constrained to STREETS — an insert without it fails. */
+          street: Street
           status?: UnitStatus
           created_at?: string
         }
         Update: {
           house_no?: string
+          street?: Street
           status?: UnitStatus
         }
         Relationships: []
+      }
+      officers: {
+        Row: {
+          /** Equal to profiles.id, which is auth.users.id. */
+          id: string
+          role: OfficerRole
+          position_label: string | null
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          id: string
+          role: OfficerRole
+          position_label?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          role?: OfficerRole
+          position_label?: string | null
+          is_active?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'officers_id_fkey'
+            columns: ['id']
+            isOneToOne: true
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      occupancies: {
+        Row: {
+          id: string
+          homeowner_id: string
+          unit_id: string
+          move_in_date: string
+          /** NULL means the homeowner currently owns the unit. */
+          move_out_date: string | null
+          ended_by_officer: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          homeowner_id: string
+          unit_id: string
+          move_in_date: string
+          move_out_date?: string | null
+          ended_by_officer?: string | null
+          created_at?: string
+        }
+        Update: {
+          move_out_date?: string | null
+          ended_by_officer?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'occupancies_homeowner_id_fkey'
+            columns: ['homeowner_id']
+            isOneToOne: false
+            referencedRelation: 'homeowners'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'occupancies_unit_id_fkey'
+            columns: ['unit_id']
+            isOneToOne: false
+            referencedRelation: 'units'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'occupancies_ended_by_officer_fkey'
+            columns: ['ended_by_officer']
+            isOneToOne: false
+            referencedRelation: 'officers'
+            referencedColumns: ['id']
+          }
+        ]
       }
       homeowners: {
         Row: {
@@ -445,6 +552,68 @@ export interface Database {
       has_any_role: {
         Args: { allowed_roles: string[] }
         Returns: boolean
+      }
+      is_officer: {
+        Args: Record<string, never>
+        Returns: boolean
+      }
+      is_super_admin: {
+        Args: Record<string, never>
+        Returns: boolean
+      }
+      get_current_owner: {
+        Args: { p_unit_id: string }
+        Returns: {
+          homeowner_id: string
+          full_name: string
+          email: string | null
+          contact_number: string | null
+          move_in_date: string
+          occupancy_id: string
+        }[]
+      }
+      get_owned_units: {
+        Args: { p_homeowner_id: string }
+        Returns: {
+          unit_id: string
+          house_no: string
+          street: Street
+          unit_code: string
+          move_in_date: string
+          occupancy_id: string
+        }[]
+      }
+      occupancy_history: {
+        Args: {
+          p_unit_id: string
+          p_from_date?: string | null
+          p_to_date?: string | null
+        }
+        Returns: {
+          occupancy_id: string
+          homeowner_id: string
+          homeowner_name: string
+          move_in_date: string
+          move_out_date: string | null
+          occupancy_duration_days: number
+          status: OccupancyStatus
+          ended_by_officer: string | null
+        }[]
+      }
+      record_occupancy_transfer: {
+        Args: {
+          p_unit_id: string
+          p_new_homeowner_id: string
+          p_move_in_date?: string
+        }
+        Returns: {
+          unit_id: string
+          ended_occupancy_id: string | null
+          previous_homeowner_id: string | null
+          new_occupancy_id: string
+          new_homeowner_id: string
+          move_in_date: string
+        }
       }
       process_payment: {
         Args: {

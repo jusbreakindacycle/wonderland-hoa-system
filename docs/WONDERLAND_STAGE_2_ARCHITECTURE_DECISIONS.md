@@ -9,6 +9,32 @@
 
 ---
 
+> ## ⚠️ AMENDED — read `DECISION_LOG.md` first
+>
+> **1. Renumbered.** These four decisions were drafted as DEC-21…DEC-24. **DEC-21 was already
+> taken** by the Android application id, recorded 10 August 2026 — two days earlier. They are now
+> **DEC-22 … DEC-25** and are renumbered throughout this document.
+>
+> **2. Corrected.** The SQL in this document was written against an assumed schema. Four of its
+> assumptions are false against the live database (project `fgsehrblzpheeghplice`, PostgreSQL 17.6),
+> verified 12 August 2026. Each block below carries an inline `⚠️ CORRECTED` note. In summary:
+>
+> | Assumption | Reality |
+> |---|---|
+> | An `officers` table with `role = 'super_admin'` exists | **It did not.** Roles were on `profiles.role`, CHECK-constrained to ten values, none of them `super_admin`. The table is now created by the Stage 2 migration — see DEC-23 |
+> | `occupancies.homeowner_id = auth.uid()` identifies a resident | Different keys. `homeowner_id` → `homeowners.id`; `auth.uid()` → `profiles.id`. Resolve through `homeowners.profile_id = auth.uid()` |
+> | `homeowners.first_name` / `.last_name` | The column is `full_name` |
+> | `EXTRACT(DAY FROM (date - date))` yields a day count | `date - date` is already an integer; `EXTRACT` rejects an integer and raises |
+>
+> **`docs/DECISION_LOG.md` DEC-22 … DEC-26 is the authority.** Where this document and the log
+> disagree, the log wins. DEC-26 additionally records the implementation deltas — the destructive
+> test-data prune, the five-street CHECK constraint, the one-current-owner unique index, the
+> `unit_code` re-expression, and the transitional `homeowners` → `occupancies` sync trigger.
+>
+> Implemented by `supabase/migrations/20260812061500_stage2_property_and_occupancy_model.sql`.
+
+---
+
 ## Overview
 
 Stage 2 implements the property and occupancy model that unblocks financial workflows (Stage 3) and resolves the 13B duplicate-homeowner bug. Before implementation, four architectural decisions must be made and logged. This document records them.
@@ -17,7 +43,8 @@ Stage 2 implements the property and occupancy model that unblocks financial work
 
 ---
 
-## DEC-21: RLS Policy for Multi-Property Ownership
+## DEC-22: RLS Policy for Multi-Property Ownership
+<sub>(drafted as DEC-21 — renumbered, see the banner above)</sub>
 
 ### Decision
 
@@ -33,27 +60,54 @@ Stage 2 implements the property and occupancy model that unblocks financial work
 
 **RLS Rule for Residents (homeowners):**
 
+> ⚠️ **CORRECTED.** The block below can never match a row: `occupancies.homeowner_id` references
+> `homeowners.id`, while `auth.uid()` is a `profiles.id`. It is also created *alongside* the
+> existing `units: resident read own` policy — and permissive policies are OR-ed, so that would
+> have *widened* resident access rather than narrowing it to current occupancy. The shipped policy
+> **replaces** the existing one under the same name. See `DECISION_LOG.md` DEC-22.
+
 ```sql
--- Residents can view their current units (occupancy.move_out_date IS NULL)
+-- ❌ AS DRAFTED — does not work, retained for traceability
 CREATE POLICY "residents_view_owned_units"
   ON units FOR SELECT
   USING (
     EXISTS (
       SELECT 1 FROM occupancies
       WHERE occupancies.unit_id = units.id
-        AND occupancies.homeowner_id = auth.uid()
+        AND occupancies.homeowner_id = auth.uid()   -- ❌ different keys
         AND occupancies.move_out_date IS NULL
+    )
+  );
+```
+
+```sql
+-- ✅ AS SHIPPED
+DROP POLICY IF EXISTS "units: resident read own" ON units;
+
+CREATE POLICY "units: resident read own"
+  ON units FOR SELECT
+  USING (
+    id IN (
+      SELECT o.unit_id
+        FROM occupancies o
+        JOIN homeowners  h ON h.id = o.homeowner_id
+       WHERE h.profile_id = auth.uid()
+         AND o.move_out_date IS NULL
     )
   );
 ```
 
 **API Query (for Stage 2 Officer Web Bridge):**
 
+> ⚠️ **CORRECTED.** `h.first_name` / `h.last_name` do not exist; the column is `full_name`.
+> Both queries ship as guarded RPCs — `get_current_owner(p_unit_id)` and
+> `get_owned_units(p_homeowner_id)` — rather than as ad-hoc SQL.
+
 ```sql
 -- Officer retrieves current occupancy for a given unit
 SELECT 
   u.id, u.house_no, u.street, u.unit_code,
-  h.id as homeowner_id, h.email, h.first_name, h.last_name,
+  h.id as homeowner_id, h.email, h.full_name,   -- ✅ full_name, not first/last
   occ.move_in_date, occ.created_at
 FROM units u
 LEFT JOIN occupancies occ ON occ.unit_id = u.id 
@@ -70,16 +124,18 @@ SELECT
   u.id, u.house_no, u.street, u.unit_code
 FROM units u
 INNER JOIN occupancies occ ON occ.unit_id = u.id
-WHERE occ.homeowner_id = auth.uid()
+INNER JOIN homeowners  h   ON h.id = occ.homeowner_id
+WHERE h.profile_id = auth.uid()   -- ✅ not occ.homeowner_id = auth.uid()
   AND occ.move_out_date IS NULL
-ORDER BY u.house_no, u.street;
+ORDER BY u.street, u.house_no;
 ```
 
 **Status:** ✅ **APPROVED** — Proceed with RLS implementation as part of schema migration.
 
 ---
 
-## DEC-22: Officer Occupancy-Transfer Permissions
+## DEC-23: Officer Occupancy-Transfer Permissions
+<sub>(drafted as DEC-22 — renumbered, see the banner above)</sub>
 
 ### Decision
 
@@ -95,6 +151,13 @@ ORDER BY u.house_no, u.street;
 ### Implementation Details
 
 **RLS Layer (Supabase):**
+
+> ⚠️ **CORRECTED.** The `officers` table these three policies read **did not exist** when this was
+> drafted, so none of them would have been creatable. The Stage 2 migration now creates it, keyed on
+> `profiles.id` (= `auth.users.id`) so that `officers.id = auth.uid()` below is correct as written.
+> The shipped policies additionally carry an explicit `TO authenticated`, and are named in the
+> `"table: audience action"` style used by the 42 policies in `001_initial_schema.sql`
+> (`"occupancies: super_admin insert"`, and so on). See `DECISION_LOG.md` DEC-23.
 
 ```sql
 -- Only super-admin can insert/update occupancies
@@ -138,9 +201,16 @@ CREATE POLICY "officers_view_occupancies"
 
 **Application Layer (Officer Web App):**
 
-1. The existing officer web app (S1-D4 bridge) has an "Officers" table with a `role` column.
-2. Add a `role` check in the occupancy-transfer UI: if `role != 'super_admin'`, hide the "Record Transfer" button and display a message: "Only administrators can record ownership transfers."
-3. Backend RPC (PostgreSQL function) validates super-admin status before accepting transfer records.
+> ⚠️ **CORRECTED / DESCOPED.** Item 1 was false — the officer web app had no "Officers" table and no
+> `super_admin` concept; roles came from `profiles.role` via `src/lib/auth.ts`. Items 2 and 3 are
+> **not built in Stage 2**: a Record Transfer button is new product functionality on the legacy web
+> bridge, which DEC-20 forbids. Only item 3's substance ships — `record_occupancy_transfer` validates
+> super-admin status server-side — matching DEC-24's own "RPC exists, no UI in Stage 2" precedent.
+> Owner decision, 12 August 2026; recorded in `DECISION_LOG.md` DEC-26 item 10.
+
+1. ~~The existing officer web app (S1-D4 bridge) has an "Officers" table with a `role` column.~~ `SUPERSEDED`
+2. ~~Add a `role` check in the occupancy-transfer UI: if `role != 'super_admin'`, hide the "Record Transfer" button…~~ `DEFERRED` — no transfer UI in Stage 2.
+3. Backend RPC (PostgreSQL function) validates super-admin status before accepting transfer records. ✅ **shipped**
 
 **Transfer Workflow (Officer View):**
 
@@ -159,7 +229,8 @@ CREATE POLICY "officers_view_occupancies"
 
 ---
 
-## DEC-23: Audit Trail Querying (Exposure and Scope)
+## DEC-24: Audit Trail Querying (Exposure and Scope)
+<sub>(drafted as DEC-23 — renumbered, see the banner above)</sub>
 
 ### Decision
 
@@ -177,7 +248,18 @@ CREATE POLICY "officers_view_occupancies"
 
 **RPC Function (PostgreSQL):**
 
+> ⚠️ **CORRECTED — the block below does not run.** Three defects:
+> (a) `h.first_name` / `h.last_name` do not exist; the column is `full_name`.
+> (b) `EXTRACT(DAY FROM (occ.move_out_date - occ.move_in_date))` raises — in PostgreSQL
+> `date - date` is already an **integer** day count, and `EXTRACT` rejects an integer. The shipped
+> form is `(COALESCE(o.move_out_date, CURRENT_DATE) - o.move_in_date)::int`.
+> (c) The officer restriction was left as a trailing comment ("Add RLS check inside function…").
+> Being `SECURITY DEFINER`-adjacent and granted to `authenticated`, a comment is not a control; the
+> shipped function opens with `IF is_officer() IS NOT TRUE THEN RAISE EXCEPTION`.
+> See `DECISION_LOG.md` DEC-24.
+
 ```sql
+-- ❌ AS DRAFTED — retained for traceability
 CREATE OR REPLACE FUNCTION occupancy_history(
   unit_id_param UUID,
   from_date DATE DEFAULT NULL,
@@ -239,11 +321,12 @@ TODO (Stage 4 decision):
 
 ---
 
-## DEC-24: Handle Reassignment Rules Post-Ownership-Transfer
+## DEC-25: Handle Reassignment Rules Post-Ownership-Transfer
+<sub>(drafted as DEC-24 — renumbered, see the banner above; content unchanged)</sub>
 
 ### Decision
 
-**After an ownership transfer, the officer records the transfer (DEC-22). The new owner's login handle is generated by the same rule as DEC-18 (derived from HOA property, e.g., `115.sampaguita`), applied at account-creation time or first-login in Stage 3. Handles are not reassigned retroactively; each new owner gets a new handle derived from their new unit. This is deferred to Stage 3 onboarding.**
+**After an ownership transfer, the officer records the transfer (DEC-23). The new owner's login handle is generated by the same rule as DEC-18 (derived from HOA property, e.g., `115.sampaguita`), applied at account-creation time or first-login in Stage 3. Handles are not reassigned retroactively; each new owner gets a new handle derived from their new unit. This is deferred to Stage 3 onboarding.**
 
 ### Rationale
 
@@ -285,10 +368,11 @@ After Stage 2 merges, when a super-admin records an ownership transfer:
 
 | Decision | Scope | Owner Role | Timeline | Follow-up |
 |----------|-------|-----------|----------|-----------|
-| **DEC-21: RLS for Multi-Property** | Data layer | Resident (current owner only) | Stage 2 schema + RLS | Stage 3 mobile UI |
-| **DEC-22: Super-Admin Transfers** | Permissions + workflow | Super-admin only | Stage 2 schema + RLS + web app | Stage 4 role expansion |
-| **DEC-23: Audit Trail Queries** | API exposure | Officers via RPC | Stage 2 RPC function | Stage 4 Reports UI |
-| **DEC-24: Handle Reassignment** | Policy (no schema impact) | Officer initiates, system assigns | Stage 2 policy doc | Stage 3 onboarding design |
+| **DEC-22: RLS for Multi-Property** | Data layer | Resident (current owner only) | Stage 2 schema + RLS | Stage 3 mobile UI |
+| **DEC-23: Super-Admin Transfers** | Permissions + workflow | Super-admin only | Stage 2 schema + RLS ~~+ web app~~ | Stage 4 role expansion |
+| **DEC-24: Audit Trail Queries** | API exposure | Officers via RPC | Stage 2 RPC function | Stage 4 Reports UI |
+| **DEC-25: Handle Reassignment** | Policy (no schema impact) | Officer initiates, system assigns | Stage 2 policy doc | Stage 3 onboarding design |
+| **DEC-26: Implementation deltas** | Migration | — | Stage 2 migration | Drop the sync trigger in Stage 3 |
 
 ---
 
@@ -296,13 +380,17 @@ After Stage 2 merges, when a super-admin records an ownership transfer:
 
 When the database migration and code is ready, verify each decision:
 
-- [ ] **DEC-21:** RLS policy allows resident to view only units with `occupancy.move_out_date IS NULL` and `homeowner_id = auth.uid()`
-- [ ] **DEC-21:** API query returns all units owned by resident (testing with multi-unit scenario)
-- [ ] **DEC-22:** Only super-admin can call occupancy insert/update RPC; regular officers see read-only view
-- [ ] **DEC-22:** Officer web app hides "Record Transfer" button for non-super-admin users
-- [ ] **DEC-23:** `occupancy_history()` RPC exists and is callable by authenticated officers
-- [ ] **DEC-23:** `occupancy_history()` filters by date range and returns full audit trail
-- [ ] **DEC-24:** No code changes in Stage 2; only document as policy for Stage 3
+- [ ] **DEC-22:** RLS policy allows a resident to view only units with `occupancy.move_out_date IS NULL`, resolved through `homeowners.profile_id = auth.uid()`
+- [ ] **DEC-22:** The old `units: resident read own` policy is **replaced**, not supplemented — confirm exactly one resident SELECT policy on `units`
+- [ ] **DEC-22:** `get_owned_units()` returns all units owned by a resident, and **raises** when a resident passes another resident's `homeowner_id`
+- [ ] **DEC-23:** `officers` table exists, seeded with exactly one `super_admin`
+- [ ] **DEC-23:** Only super-admin can call `record_occupancy_transfer`; regular officers get `Permission denied`
+- [ ] **DEC-23:** `record_occupancy_transfer` succeeds on a **vacant** unit with no prior occupancy, and writes an `occupancy.transferred` row to `audit_logs`
+- [ ] ~~**DEC-23:** Officer web app hides "Record Transfer" button for non-super-admin users~~ `DEFERRED` — no transfer UI in Stage 2 (DEC-20)
+- [ ] **DEC-24:** `occupancy_history()` exists, is callable by officers, and **raises** for a resident
+- [ ] **DEC-24:** `occupancy_history()` filters by date range and returns a correct `occupancy_duration_days`
+- [ ] **DEC-25:** No code changes in Stage 2; only document as policy for Stage 3
+- [ ] **DEC-26:** `units` holds exactly five rows, one per confirmed street; `INSERT … 'Circle'` violates `units_street_check`; a second open occupancy on one unit violates `idx_occupancies_one_current_owner_per_unit`
 
 ---
 

@@ -1,10 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { supabase } from '@/lib/supabase'
+import type { Street } from '@/lib/database.types'
 
 export type UnitWithHomeowner = {
   id: string
   house_no: string
+  street: Street
+  /** Generated: `"<house_no> <street>"`, e.g. `"113 Sunflower"`. */
   unit_code: string
   status: 'occupied' | 'vacant'
   homeowners: {
@@ -24,6 +27,7 @@ export function useUnits() {
       const { data, error } = await supabase
         .from('units')
         .select('*, homeowners(id, full_name, email, contact_number, move_in_date, is_active)')
+        .order('street')
         .order('house_no')
       if (error) throw error
       return data as UnitWithHomeowner[]
@@ -56,7 +60,8 @@ export function useUnitDetail(unitId: string | null) {
 export function useAddUnit() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (unit: { house_no: string; status?: 'occupied' | 'vacant' }) => {
+    // `street` is NOT NULL and constrained to STREETS — an insert without it is rejected.
+    mutationFn: async (unit: { house_no: string; street: Street; status?: 'occupied' | 'vacant' }) => {
       const { data, error } = await supabase.from('units').insert(unit).select().single()
       if (error) throw error
       return data
@@ -69,7 +74,7 @@ export function useAddUnit() {
 export function useUpdateUnit() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string; status?: 'occupied' | 'vacant'; house_no?: string }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; status?: 'occupied' | 'vacant'; house_no?: string; street?: Street }) => {
       const { data, error } = await supabase.from('units').update(updates).eq('id', id).select().single()
       if (error) throw error
       return data
